@@ -1,0 +1,16 @@
+{
+  "name": "effort-cycle",
+  "version": "0.1.0",
+  "author": { "name": "Aner Cohen" },
+  "repository": "https://github.com/Anerco/effort-cycle-mod",
+  "license": "MIT",
+  "description": "Alt+E steps the effort level up and Alt+Shift+E down; the footer shows the model and level as they change",
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "includeLow": { "type": "boolean", "title": "Effort keys: include low", "description": "Alt+E and Alt+Shift+E step through low.", "default": true },
+    "includeMedium": { "type": "boolean", "title": "Effort keys: include medium", "description": "Alt+E and Alt+Shift+E step through medium.", "default": true },
+    "includeHigh": { "type": "boolean", "title": "Effort keys: include high", "description": "Alt+E and Alt+Shift+E step through high.", "default": true },
+    "includeXhigh": { "type": "boolean", "title": "Effort keys: include xhigh", "description": "Alt+E and Alt+Shift+E step through xhigh.", "default": true },
+    "includeMax": { "type": "boolean", "title": "Effort keys: include max", "description": "Alt+E and Alt+Shift+E step through max.", "default": true }
+  }
+}
