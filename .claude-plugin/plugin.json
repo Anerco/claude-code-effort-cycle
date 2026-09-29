@@ -2,7 +2,7 @@
   "name": "effort-cycle",
   "version": "0.1.0",
   "author": { "name": "Aner Cohen" },
-  "repository": "https://github.com/Anerco/effort-cycle-mod",
+  "repository": "https://github.com/Anerco/claude-code-effort-cycle",
   "license": "MIT",
   "description": "Alt+E steps the effort level up and Alt+Shift+E down; the footer shows the model and level as they change",
   "types": "./types/index.d.ts",

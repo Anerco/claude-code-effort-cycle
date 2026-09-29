@@ -1,7 +1,7 @@
-# effort-cycle
+# effort-cycle: effort level keyboard shortcuts for Claude Code
 
-A Claude Code mod that changes the effort level from the keyboard, without
-leaving a row in the transcript:
+A Claude Code plugin that changes the reasoning effort level from the
+keyboard, without leaving a row in the transcript:
 
 - **Alt+E** steps the effort up: low → medium → high → xhigh → max, stopping at max.
 - **Alt+Shift+E** steps it down, stopping at low.
@@ -65,7 +65,7 @@ for every model. The values are stored in `~/.claude/settings.json` under
 ## Known issues
 
 - **The spinner can show a different level from the footer**
-  ([#1](https://github.com/Anerco/effort-cycle-mod/issues/1)). The footer is the
+  ([#1](https://github.com/Anerco/claude-code-effort-cycle/issues/1)). The footer is the
   level the requests go out with; the spinner reads Claude Code's own state,
   which a mod cannot change.
 - **The level is not kept after a restart.** An Alt+E pick lasts for the
