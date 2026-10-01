@@ -5,6 +5,7 @@
   "homepage": "https://github.com/Anerco/claude-code-effort-cycle#readme",
   "repository": "https://github.com/Anerco/claude-code-effort-cycle",
   "supportUrl": "https://github.com/Anerco/claude-code-effort-cycle/issues",
+  "privacyPolicyUrl": "https://github.com/Anerco/claude-code-effort-cycle#privacy",
   "license": "MIT",
   "description": "Alt+E steps the effort level up and Alt+Shift+E down; the footer shows the model and level as they change",
   "types": "./types/index.d.ts",

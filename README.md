@@ -92,6 +92,13 @@ Run `/plugin-types .claude-plugin/types` in a Claude Code session to write the
 API declarations an editor and `tsc` type the mod against. They are generated
 per Claude Code build and are not committed.
 
+## Privacy
+
+effort-cycle collects no personal data. It reads Claude Code's own settings
+and the session's model name, keeps the chosen effort level in session state
+on your machine, and sends nothing to any server: no telemetry, no network
+requests. Nothing is kept after the session ends.
+
 ## License
 
 MIT
