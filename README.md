@@ -17,6 +17,12 @@ The level applies to the main thread's model requests. Subagents keep Claude
 Code's own level. Changing effort Claude Code's way (`/effort`, the Alt+P
 picker) takes over again from the next request.
 
+What it hooks: each model request on the main thread, to set its effort
+level; the `/effort` and `/model` commands, which it lets run unchanged and
+only watches afterwards to drop its own level and redraw the footer; and the
+footer itself, to draw the meter. It reads your settings and nothing else,
+sends nothing anywhere, and keeps its state in the session only.
+
 Mods (plugins of function hooks) are an early-access Claude Code API that
 changes between releases. This one is built and tested against Claude Code
 2.1.283.
