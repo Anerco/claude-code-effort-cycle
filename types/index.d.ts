@@ -6,8 +6,18 @@ export type AgentEffort = {
   base: string | null
   /** The level Alt+E or Alt+Shift+E picked while its transcript was in view, sent on its requests; null follows the engine's. */
   override: string | null
-  /** What the footer calls it: its agent type, a teammate's name; absent when the session lists no such agent. */
+  /** What the footer calls it: its agent type, a teammate spawned as none by its name; absent when the session lists no such agent. */
   label?: string
+}
+
+/** A live subagent the band has a row for, as `$.agent.list()` gave it. */
+export type LiveAgent = {
+  /** Its agent id. */
+  id: string
+  /** Its agent type, a teammate spawned as none by its name. */
+  label: string
+  /** The Agent call's description of its task. */
+  description: string
 }
 
 declare module 'claude-code' {
@@ -21,8 +31,10 @@ declare module 'claude-code' {
       agents: StateFamily<AgentEffort>
       /** The agent an Agent call started, by the call's tool_use_id, so the call's row can show its effort. */
       spawns: StateFamily<string>
-      /** The agent whose transcript is in view, as the band above the prompt last saw it; null while the main conversation is. */
-      viewed: string | null
+      /** The agent whose transcript is in view, by surface (`terminal`, `desktop`), as that surface's band last saw it; null while the main conversation is. */
+      viewedOn: StateFamily<string | null>
+      /** The subagents that are live (pending, running, waiting or idle), as the last poll of `$.agent.list()` found them. */
+      live: LiveAgent[]
       /** The model the footer label last drew; a change (/model, alt+p) draws it again. */
       drawnModel: string
       /** The step Alt+E or Alt+Shift+E just made, as level indexes, whose blocks the meter lights for a moment (`from` equal to `to` is a press past the end, which lights the word); `id` counts the presses so only the latest clears it; `agentId` is the agent it stepped, null for the main thread. */

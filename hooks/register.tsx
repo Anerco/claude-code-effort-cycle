@@ -1,7 +1,7 @@
 import { update } from 'claude-code'
-import type { EngineInterface as Engine, PluginOptions, Register, Timer } from 'claude-code'
+import type { AgentInfo, EngineInterface as Engine, PluginOptions, Register, RenderElement, Timer } from 'claude-code'
 
-import type { AgentEffort } from '../types'
+import type { AgentEffort, LiveAgent } from '../types'
 
 // Alt+E steps the effort level up (low → medium → high → xhigh → max) and
 // Alt+Shift+E down, each stopping at the end, for the agent in view: the main
@@ -10,6 +10,9 @@ import type { AgentEffort } from '../types'
 // a subagent's led by its type, the meter and word colored cool to hot, the
 // blocks a press filled or emptied lit for a moment) the moment either changes,
 // and a line under each Agent call shows the level of the agent it started.
+// While the main thread is in view, the band above the prompt has a row per
+// live subagent with its level (`▰▰▱▱▱ medium  Sonnet 5.5 · Explore · <task>`),
+// gone when the agent ends; a poll of `$.agent.list()` says which are live.
 // A press past either end lights the word instead. At max the model name turns
 // red too, and while Claude works a light sweeps across the bar. The keys step only
 // through the levels /config's five include toggles allow, for every model.
@@ -17,11 +20,14 @@ import type { AgentEffort } from '../types'
 // Each agent's level is its own. A subagent's starts as the engine resolved it
 // (its definition's effort, else the parent's), read off its first model
 // request, since neither `$.agent.list()` nor `agent.spawn` carries an effort;
-// until then its meter is empty and a press leaves it. A press while its
-// transcript is in view sets the level its next requests go out with and leaves
-// the main thread and every other agent as they were. Only the band above the
-// prompt is told which transcript is in view (`view.agentId`), so the band's
-// buttons step that agent and the band records it for the footer to draw.
+// until then its meter is empty, and a press leaves it and says `wait`. A press
+// while its transcript is in view sets the level its next requests go out with
+// and leaves the main thread and every other agent as they were. Only the band
+// above the prompt is told which transcript is in view (`view.agentId`), so the
+// band records it for the footer to draw, and a press steps the agent recorded
+// for the surface it came from: what that surface's footer shows. Each surface
+// keeps its own: a session attached over Remote Control draws the band and the
+// footer on the other surface too, showing its own transcript.
 //
 // A key reaches a mod without a prompt only through a Button naming an engine
 // keybinding action, so keybindings.json binds meta+e to strip:jump9 and
@@ -44,7 +50,8 @@ const override = { plugin: 'effort-cycle', key: 'override' } as const
 const base = { plugin: 'effort-cycle', key: 'base' } as const
 const agents = { plugin: 'effort-cycle', key: 'agents' } as const
 const spawns = { plugin: 'effort-cycle', key: 'spawns' } as const
-const viewed = { plugin: 'effort-cycle', key: 'viewed' } as const
+const viewed = { plugin: 'effort-cycle', key: 'viewedOn' } as const
+const live = { plugin: 'effort-cycle', key: 'live' } as const
 const drawnModel = { plugin: 'effort-cycle', key: 'drawnModel' } as const
 const flash = { plugin: 'effort-cycle', key: 'flash' } as const
 const swept = { plugin: 'effort-cycle', key: 'swept' } as const
@@ -54,19 +61,34 @@ const HEAT: Record<string, string> = { low: 'inactive', medium: 'success', high:
 const FLASH_MS = 1000
 // The word's slot is as wide as the longest level, so the model and meter stay put as the level changes.
 const WIDEST = Math.max(...LEVELS.map(l => l.length))
-// The word while no request of a subagent's has said its level.
+// The word while no request of a subagent's has said its level, and after a press on it.
 const UNSEEN = '—'
+const WAIT = 'wait'
+// How often the band's rows ask which subagents are live, and the statuses that are.
+const POLL_MS = 2000
+const LIVE: readonly AgentInfo['status'][] = ['pending', 'running', 'waiting', 'idle']
 // The sweep moves one block per step, as a terminal draws it, then rests: 5 steps of 85ms in each 1530ms.
 const SWEEP_STEP_MS = 85
 const SWEEP_STEPS = 18
 
 // Runs while Claude works; the band starts and stops it.
 let sweeper: Timer | undefined
+// Asks which subagents are live, from the session's start.
+let poller: Timer | undefined
 
 // What the footer draws for the agent in view: its model and level (null while unknown), a subagent's label.
 type Shown = { model?: string; level: string | null; label?: string }
+// A row of the band: a live subagent and its level.
+type Row = LiveAgent & { model?: string; level: string | null }
 
 export const register: Register = (on, options) => {
+  on('session.start', ($, e, next) => {
+    poller?.cancel()
+    poller = $.clock.every(POLL_MS, () => void poll($))
+    $.clock.after(0, () => void poll($))
+    return next(e)
+  })
+
   on('turn.step', async function* ($, e, next) {
     if (e.agentId !== undefined) {
       const chosen = await agentStep($, e.agentId, e.model, e.effort)
@@ -106,7 +128,7 @@ export const register: Register = (on, options) => {
 
   on('ui.render', { component: 'SessionMode' }, async ($, e) => {
     await $.state.get(drawnModel)
-    const agentId = (await $.state.get(viewed)).value ?? null
+    const agentId = (await $.state.get({ ...viewed, id: e.surface })).value ?? null
     const pressed = (await $.state.get(flash)).value ?? null
     const head = (await $.state.get(swept)).value ?? null
     const { model, level, label } = await shown($, agentId)
@@ -134,7 +156,7 @@ export const register: Register = (on, options) => {
             if (i === head && level === 'max') return <Text color="text">▰</Text>
             return full ? <Text color={color}>▰</Text> : <Text dimColor>▱</Text>
           })}
-          <Text {...word}> {(level ?? UNSEEN).padEnd(WIDEST)}</Text>
+          <Text {...word}> {(level ?? (atEnd ? WAIT : UNSEEN)).padEnd(WIDEST)}</Text>
         </Box>
       </Box>
     )
@@ -143,19 +165,33 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const model = await $.session.model()
     const agentId = e.props.view?.agentId ?? null
+    const here = { ...viewed, id: e.surface }
     // A render may not write state, so the new model and the transcript in view are recorded just after.
     if (model !== (await $.state.get(drawnModel)).value) $.clock.after(0, () => void $.state.set(drawnModel, model))
-    if (agentId !== ((await $.state.get(viewed)).value ?? null)) $.clock.after(0, () => void $.state.set(viewed, agentId))
-    if (e.props.isWorking !== (sweeper !== undefined)) $.clock.after(0, () => sweep($, e.props.isWorking))
+    if (agentId !== ((await $.state.get(here)).value ?? null)) $.clock.after(0, () => void $.state.set(here, agentId))
+    if (e.props.isWorking !== (sweeper !== undefined)) $.clock.after(0, () => sweep($, e.props.isWorking, e.surface))
+    // With the main thread in view, a row per live subagent; in a subagent's, the footer is that agent's.
+    const rows = agentId === null && !e.props.hasSurvey ? await agentRows($) : []
     // The band is shared: what the plugins beneath and Claude Code's surveys draw there stays, the buttons hidden beside it.
     const below = await next(e)
-    const { Box, Button } = $.ui.resolve(e)
+    const { Box, Text, Button } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
+        {rows.map(row => (
+          <Box key={`effort-${row.id}`}>
+            <Text wrap="truncate-end">
+              {blocks(row.level)}
+              <Text {...heat(row.level)}> {(row.level ?? UNSEEN).padEnd(WIDEST)}  </Text>
+              {row.model !== undefined && <Text dimColor>{displayName(row.model)} · </Text>}
+              {row.label}
+              <Text dimColor> · {row.description}</Text>
+            </Text>
+          </Box>
+        ))}
         {below}
         <Box display="none">
-          <Button key="effort-up" label="effort up" action="strip:jump9" onPress={() => step($, options, 1, agentId)} />
-          <Button key="effort-down" label="effort down" action="strip:jump8" onPress={() => step($, options, -1, agentId)} />
+          <Button key="effort-up" label="effort up" action="strip:jump9" onPress={press => step($, options, 1, press.surface)} />
+          <Button key="effort-down" label="effort down" action="strip:jump8" onPress={press => step($, options, -1, press.surface)} />
         </Box>
       </Box>
     )
@@ -168,16 +204,14 @@ export const register: Register = (on, options) => {
     const held = agentId === undefined ? undefined : (await $.state.get({ ...agents, id: agentId })).value
     const level = held === undefined ? null : agentLevel(held)
     if (held === undefined || level === null) return drawn
-    const filled = LEVELS.indexOf(level) + 1
-    const color = HEAT[level]
     const { Box, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column">
         {drawn}
         <Box key="effort" paddingLeft={2}>
           <Text dimColor>{displayName(held.model)} </Text>
-          {LEVELS.map((_, i) => (i < filled ? <Text color={color}>▰</Text> : <Text dimColor>▱</Text>))}
-          <Text color={color}> {level}</Text>
+          {blocks(level)}
+          <Text {...heat(level)}> {level}</Text>
         </Box>
       </Box>
     )
@@ -201,9 +235,10 @@ async function agentStep($: Engine, agentId: string, model: string, effort: stri
   return level === null ? null : now.override
 }
 
-// The next allowed level above (or below) the agent's current one; past the end, or while a subagent's
-// level is unknown, the level stays and the word lights.
-async function step($: Engine, options: PluginOptions, by: 1 | -1, agentId: string | null) {
+// The next allowed level above (or below) the current one of the agent the surface's footer shows; past the
+// end the level stays and the word lights, and while a subagent's level is unknown the word says `wait`.
+async function step($: Engine, options: PluginOptions, by: 1 | -1, surface: string) {
+  const agentId = (await $.state.get({ ...viewed, id: surface })).value ?? null
   const allowed = LEVELS.filter(level => options[`include${level.charAt(0).toUpperCase()}${level.slice(1)}`] !== false)
   const above = (current: number) =>
     by > 0 ? allowed.find(l => LEVELS.indexOf(l) > current) : [...allowed].reverse().find(l => LEVELS.indexOf(l) < current)
@@ -234,7 +269,7 @@ async function step($: Engine, options: PluginOptions, by: 1 | -1, agentId: stri
 }
 
 // While Claude works, steps the sweep's head along the bar at max; otherwise stops it and clears the head.
-function sweep($: Engine, working: boolean) {
+function sweep($: Engine, working: boolean, surface: string) {
   if (working === (sweeper !== undefined)) return
   sweeper?.cancel()
   sweeper = undefined
@@ -244,7 +279,7 @@ function sweep($: Engine, working: boolean) {
     const at = tick++ % SWEEP_STEPS
     // The head moves over the blocks and leaves; nothing changes while it rests.
     if (at > LEVELS.length) return
-    const onMax = (await shown($, (await $.state.get(viewed)).value ?? null)).level === 'max'
+    const onMax = (await shown($, (await $.state.get({ ...viewed, id: surface })).value ?? null)).level === 'max'
     const head = onMax && at < LEVELS.length ? at : null
     if ((await $.state.get(swept)).value !== head) await $.state.set(swept, head)
   })
@@ -266,16 +301,54 @@ function agentLevel(held: AgentEffort): string | null {
   return held.override ?? held.base
 }
 
-// What the footer calls a subagent: its agent type, a teammate's name; undefined for a loop the session
+// What the footer calls a subagent: its agent type, a teammate spawned as none by its name; undefined for a loop the session
 // lists no agent for (the engine's own forks).
 async function labelFor($: Engine, agentId: string): Promise<string | undefined> {
   try {
     const info = (await $.agent.list()).find(agent => agent.id === agentId)
-    if (info === undefined) return undefined
-    return info.teammateId !== undefined && info.name !== undefined ? info.name : info.type
+    return info === undefined ? undefined : labelOf(info)
   } catch {
     return undefined
   }
+}
+
+function labelOf(info: AgentInfo): string {
+  return info.type === 'teammate' && info.name !== undefined ? info.name : info.type
+}
+
+// Records which subagents are live, for the band's rows; written only when that changed.
+async function poll($: Engine) {
+  let listed: AgentInfo[]
+  try {
+    listed = await $.agent.list()
+  } catch {
+    return
+  }
+  const found = listed.filter(agent => LIVE.includes(agent.status)).map(agent => ({ id: agent.id, label: labelOf(agent), description: agent.description }))
+  if (JSON.stringify((await $.state.get(live)).value ?? []) !== JSON.stringify(found)) await $.state.set(live, found)
+}
+
+// The band's rows: each live subagent with its model and level as its requests and the keys left them.
+async function agentRows($: Engine): Promise<Row[]> {
+  const listed = (await $.state.get(live)).value ?? []
+  return Promise.all(
+    listed.map(async agent => {
+      const held = (await $.state.get({ ...agents, id: agent.id })).value
+      return { ...agent, ...(held === undefined ? {} : { model: held.model }), level: held === undefined ? null : agentLevel(held) }
+    }),
+  )
+}
+
+// The five blocks of a level's meter, filled up to the level in its color: plain elements every surface draws.
+function blocks(level: string | null): RenderElement[] {
+  const filled = level === null ? 0 : LEVELS.indexOf(level) + 1
+  return LEVELS.map((_, i) => ({ type: 'Text', props: i < filled ? heat(level) : { dimColor: true }, children: [i < filled ? '▰' : '▱'] }))
+}
+
+// A level's color, by theme key; dim while it is unknown.
+function heat(level: string | null): { color: string } | { dimColor: true } {
+  const color = level === null ? undefined : HEAT[level]
+  return color === undefined ? { dimColor: true } : { color }
 }
 
 // The level the main thread's next request goes out with: Alt+E's or Alt+Shift+E's, else the engine's

@@ -14,29 +14,38 @@ keyboard, per agent, without leaving a row in the transcript:
   while Claude works a light sweeps across the bar. In a subagent's
   transcript the meter is that agent's, led by its type:
   `Explore · Opus 5.5 ▰▰▱▱▱ medium`.
+- While the main thread is in view, the band above the prompt has a row per
+  live subagent with its level, gone when the agent ends:
+  `▰▰▱▱▱ medium  Sonnet 5.5 · Explore · Find the config`.
 - A line under each Agent call in the transcript shows the level of the agent
-  it started, so every subagent's level is in sight at once.
+  it started.
 
 ![Alt+E steps the effort meter up to max, a light sweeps the bar while Claude works, Alt+Shift+E steps back down](demo.gif)
 
-Each agent's level is its own and applies to that agent's next model
-requests. A subagent starts at the level Claude Code gives it (its
-definition's `effort`, else the main thread's), which the plugin reads off
-the subagent's first model request; until then its meter is empty (`—`) and
-the keys leave it. Changing effort Claude Code's way (`/effort`, the Alt+P
+Each agent's level is its own and applies to that agent's next model requests.
+A subagent starts at the level Claude Code gives it (its definition's
+`effort`, else the main thread's), which the plugin reads off the subagent's
+first model request; until then its meter is empty (`—`), and a press leaves
+it and says `wait`. Changing effort Claude Code's way (`/effort`, the Alt+P
 picker) takes over again from the next request, for the main thread and for
 any subagent whose level Claude Code changes with it.
 
-What it hooks: each model request, the main thread's and every subagent's, to
-read its effort level and set the one picked for that agent; each subagent's
-start, to tie the Agent call to the agent it started; the `/effort` and
-`/model` commands, which it lets run unchanged and only watches afterwards to
-drop its own level and redraw the footer; the footer itself, to draw the
-meter; the Agent calls' rows, to add the line under them; and the band above
-the prompt, which says whose transcript is in view and where two hidden
-buttons take the keys, leaving whatever other plugins and Claude Code show
-there in place. It reads your settings and the session's list of agents and
-nothing else, sends nothing anywhere, and keeps its state in the session only.
+With the session also open on another surface over Remote Control (Claude
+Code Desktop), each surface follows its own view: the keys step the agent
+whose level that surface's footer shows.
+
+What it hooks: the session's start, to ask the session's list of agents every
+two seconds which subagents are live; each model request, the main thread's
+and every subagent's, to read its effort level and set the one picked for that
+agent; each subagent's start, to tie the Agent call to the agent it started;
+the `/effort` and `/model` commands, which it lets run unchanged and only
+watches afterwards to drop its own level and redraw the footer; the footer
+itself, to draw the meter; the Agent calls' rows, to add the line under them;
+and the band above the prompt, which says whose transcript is in view, where
+the rows of live subagents go and where two hidden buttons take the keys,
+leaving whatever other plugins and Claude Code show there in place. It reads
+your settings and the session's list of agents and nothing else, sends nothing
+anywhere, and keeps its state in the session only.
 
 Mods (plugins of function hooks) are an early-access Claude Code API that
 changes between releases. This one is built and tested against Claude Code
@@ -95,9 +104,13 @@ for every model. The values are stored in `~/.claude/settings.json` under
 - **A subagent's level shows once it has made a model request.** Neither the
   session's list of agents nor a subagent's start says what effort it runs at,
   so the plugin learns it from the agent's first request, a moment after it
-  starts. An agent that finished before the plugin loaded shows `—`.
+  starts. An agent started before the plugin loaded shows `—` until its next
+  request.
 - **The tasks list does not show the levels.** The plugin API draws no part of
-  it, so the levels are on the Agent calls' rows and in the footer instead.
+  it, so the levels are in the band's rows, on the Agent calls' rows and in the
+  footer instead.
+- **A subagent's level changes only in its own view.** Open it from the tasks
+  list and press the keys there; the band's rows only show the levels.
 - **Ultracode is not a step.** It is a separate on/off switch that works at
   any level (`/effort ultracode on`), and the plugin API exposes no way to
   switch it.

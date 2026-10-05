@@ -5,7 +5,7 @@ import type { AgentInfo, On, RenderElement, RenderPropsOf } from 'claude-code'
 // Claude Code's own band, beneath every plugin: empty here, as with no survey up.
 const engineBand = (on: On) => on('ui.render', { component: 'AbovePrompt' }, (): RenderElement => ({ type: 'Box', children: [] }))
 const BAND: RenderPropsOf['AbovePrompt'] = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120, scroll: { offset: 0, bodyRows: 19 }, view: {} }
-const agent = (id: string, type: string): AgentInfo => ({ id, description: 'a task', type, status: 'running' })
+const agent = (id: string, type: string, description = 'a task'): AgentInfo => ({ id, description, type, status: 'running' })
 
 // A session on Opus 5.5 at high with two subagents, an Explore and a general-purpose; `sent` holds each
 // request's agent and effort as it left the plugin, and `view` opens a transcript as the tasks list does.
@@ -14,7 +14,9 @@ async function world($: Engine, on: On) {
   const clock = mock.clock(on)
   on('settings.read', () => ({ value: { effortLevel: 'high' } }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
-  on('agent.list', () => ({ value: [agent('a1', 'Explore'), agent('a2', 'general-purpose')] }))
+  const listed = [agent('a1', 'Explore', 'Find the config'), agent('a2', 'general-purpose', 'Fix the parser')]
+  on('agent.list', () => ({ value: listed }))
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
   const sent: string[] = []
   on('turn.step', async function* (_, e) {
     sent.push(`${e.agentId ?? 'main'}:${e.effort}`)
@@ -34,7 +36,7 @@ async function world($: Engine, on: On) {
   }
   const up = () => band.press({ key: 'effort-up' })
   const down = () => band.press({ key: 'effort-down' })
-  return { clock, sent, request, footer, view, up, down }
+  return { clock, band, listed, sent, request, footer, view, up, down }
 }
 
 test('Alt+E steps the level up and Alt+Shift+E down, stopping at the ends, the footer shows model and level, main-loop requests carry it, the engine taking over drops it', async ($, on) => {
@@ -245,11 +247,13 @@ test('each agent keeps its own level: the keys step the agent in view, the foote
   expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▱▱ high')
 })
 
-test('an agent\'s meter is empty until its first request says its level, and a press leaves it; the engine changing its level drops the pick', async ($, on) => {
-  const { sent, request, footer, view, up } = await world($, on)
+test('an agent\'s meter is empty until its first request says its level, and a press leaves it saying wait; the engine changing its level drops the pick', async ($, on) => {
+  const { clock, sent, request, footer, view, up } = await world($, on)
   await view('a1')
   expect(await footer()).toBe('Explore · ▱▱▱▱▱ —')
   await up()
+  expect(await footer()).toBe('Explore · ▱▱▱▱▱ wait')
+  await clock.advance(1000)
   expect(await footer()).toBe('Explore · ▱▱▱▱▱ —')
   await request('medium', 'a1')
   expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
@@ -281,4 +285,45 @@ test('the line under an Agent call shows the level of the agent it started, and 
   await up()
   expect(await line()).toBe('Opus 5.5 ▰▰▰▱▱ high')
   expect((await row.find({ key: 'engine' }))?.text).toBe('Explore(Find the config)')
+})
+
+test('two surfaces drawing the band keep their own view: the terminal in a subagent, a remote surface on the main thread', async ($, on) => {
+  const { request, footer, view, up } = await world($, on)
+  await request('medium', 'a1')
+  // A remote surface (Claude Code Desktop, attached over Remote Control) draws the band and footer too, on the main thread.
+  await $.ui.mount({ plugin: 'effort-cycle', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  const remote = await $.ui.mount({ plugin: 'effort-cycle', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
+  const remoteFooter = async () => (await remote.find({ key: 'effort' }))?.text.trim()
+  await view('a1')
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
+  expect(await remoteFooter()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+  await up()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▱▱ high')
+  expect(await remoteFooter()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+})
+
+test('with the main thread in view the band has a row per live subagent with its level, gone in a subagent\'s view and when the agent ends', async ($, on) => {
+  const { clock, band, listed, request, view, up } = await world($, on)
+  const row = async (id: string) => (await band.find({ key: `effort-${id}` }))?.text
+  await request('medium', 'a1')
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as any)
+  await clock.settle()
+
+  expect(await row('a1')).toBe('▰▰▱▱▱ medium  Opus 5.5 · Explore · Find the config')
+  // The general-purpose agent has made no request yet: its row says so.
+  expect(await row('a2')).toBe('▱▱▱▱▱ —       general-purpose · Fix the parser')
+  await request('high', 'a2')
+  expect(await row('a2')).toBe('▰▰▰▱▱ high    Opus 5.5 · general-purpose · Fix the parser')
+
+  // In a subagent's view the rows give way to its footer, and a press there shows in its row back on main.
+  await view('a1')
+  expect(await row('a1')).toBeUndefined()
+  await up()
+  await view()
+  expect(await row('a1')).toBe('▰▰▰▱▱ high    Opus 5.5 · Explore · Find the config')
+
+  listed[1] = { ...listed[1]!, status: 'completed' }
+  await clock.advance(2000)
+  expect(await row('a2')).toBeUndefined()
+  expect(await row('a1')).toBeDefined()
 })
