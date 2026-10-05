@@ -4,6 +4,8 @@ import type { AgentInfo, On, RenderElement, RenderPropsOf } from 'claude-code'
 
 // Claude Code's own band, beneath every plugin: empty here, as with no survey up.
 const engineBand = (on: On) => on('ui.render', { component: 'AbovePrompt' }, (): RenderElement => ({ type: 'Box', children: [] }))
+// Claude Code's own footer modes, beneath the plugin: what shows when the plugin draws no meter there.
+const engineModes = (on: On) => on('ui.render', { component: 'SessionMode' }, (): RenderElement => ({ type: 'Box', props: { key: 'engine-modes' }, children: [] }))
 const BAND: RenderPropsOf['AbovePrompt'] = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120, scroll: { offset: 0, bodyRows: 19 }, view: {} }
 const agent = (id: string, type: string, description = 'a task'): AgentInfo => ({ id, description, type, status: 'running' })
 
@@ -11,6 +13,7 @@ const agent = (id: string, type: string, description = 'a task'): AgentInfo => (
 // request's agent and effort as it left the plugin, and `view` opens a transcript as the tasks list does.
 async function world($: Engine, on: On) {
   engineBand(on)
+  engineModes(on)
   const clock = mock.clock(on)
   on('settings.read', () => ({ value: { effortLevel: 'high' } }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
@@ -304,23 +307,23 @@ test('two surfaces drawing the band keep their own view: the terminal in a subag
 
 test('with the main thread in view the band has a row per live subagent with its level, gone in a subagent\'s view and when the agent ends', async ($, on) => {
   const { clock, band, listed, request, view, up } = await world($, on)
-  const row = async (id: string) => (await band.find({ key: `effort-${id}` }))?.text
+  const row = (id: string) => rowText(band, id)
   await request('medium', 'a1')
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as any)
   await clock.settle()
 
-  expect(await row('a1')).toBe('[-] [+] ▰▰▱▱▱ medium  Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe('[-] ▰▰▱▱▱ medium [+]  Opus 5.5 · Explore · Find the config')
   // The general-purpose agent has made no request yet: its row says so.
-  expect(await row('a2')).toBe('[-] [+] ▱▱▱▱▱ —       general-purpose · Fix the parser')
+  expect(await row('a2')).toBe('[-] ▱▱▱▱▱ —      [+]  general-purpose · Fix the parser')
   await request('high', 'a2')
-  expect(await row('a2')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · general-purpose · Fix the parser')
+  expect(await row('a2')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · general-purpose · Fix the parser')
 
   // In a subagent's view the rows give way to its footer, and a press there shows in its row back on main.
   await view('a1')
   expect(await row('a1')).toBeUndefined()
   await up()
   await view()
-  expect(await row('a1')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · Explore · Find the config')
 
   listed[1] = { ...listed[1]!, status: 'completed' }
   await clock.advance(2000)
@@ -335,8 +338,12 @@ async function rows($: Engine, on: On, { seen = true } = {}) {
   if (seen) await w.request('high', 'a2')
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as any)
   await w.clock.settle()
-  const row = async (id: string) => (await w.band.find({ key: `effort-${id}` }))?.text
-  const click = (key: string) => w.band.press({ key })
+  const row = (id: string) => rowText(w.band, id)
+  // A click on a stepper as the terminal reports it: the button down, then up, in the stepper's cells.
+  const click = async (key: string) => {
+    await w.band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: key })
+    await w.band.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: key })
+  }
   const lit = async () => (await w.band.findAll({ type: 'Text', text: /^[▰▱]$/ })).filter(b => b.props.color === 'text' && b.props.bold).length
   return { ...w, row, click, lit }
 }
@@ -344,9 +351,9 @@ async function rows($: Engine, on: On, { seen = true } = {}) {
 test('a row\'s [-] and [+] step that agent alone, on its next requests, lighting the block they crossed', async ($, on) => {
   const { sent, request, footer, row, click, lit, clock } = await rows($, on)
   await click('effort-a1-up')
-  expect(await row('a1')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · Explore · Find the config')
   expect(await lit()).toBe(1)
-  expect(await row('a2')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · general-purpose · Fix the parser')
+  expect(await row('a2')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · general-purpose · Fix the parser')
   expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
   await clock.advance(1000)
   expect(await lit()).toBe(0)
@@ -357,37 +364,78 @@ test('a row\'s [-] and [+] step that agent alone, on its next requests, lighting
   expect(sent.slice(2)).toEqual(['main:high', 'a1:high', 'a2:medium'])
 })
 
-test('a row\'s buttons visit only the levels the include toggles allow and stop at the ends; on an agent not yet seen they say wait', { options: { includeMax: false } }, async ($, on) => {
+test('three quick clicks on a stepper step three times, then stop at the end', async ($, on) => {
+  const { sent, request, row, click } = await rows($, on)
+  for (let i = 0; i < 3; i++) await click('effort-a1-up')
+  expect(await row('a1')).toBe('[-] ▰▰▰▰▰ max    [+]  Opus 5.5 · Explore · Find the config')
+  for (let i = 0; i < 3; i++) await click('effort-a1-up')
+  expect(await row('a1')).toBe('[-] ▰▰▰▰▰ max    [+]  Opus 5.5 · Explore · Find the config')
+  await request('medium', 'a1')
+  expect(sent.at(-1)).toBe('a1:max')
+})
+
+test('a row reads [-], the meter and its word, [+], then model, name and task; the word as wide as the widest, so [+] stands in one column', { options: { mainThreadRow: true } }, async ($, on) => {
+  const { band, row } = await rows($, on)
+  const parts = (await band.find({ key: 'effort-a1' }))?.children.map(child => (child as { props: { key?: string } }).props.key)
+  expect(parts).toEqual(['effort-a1-down', 'effort-a1-level', 'effort-a1-up', 'effort-a1-about'])
+  const column = async (id: string) => (await row(id))?.indexOf('[+]')
+  expect(await column('main')).toBe(await column('a1'))
+  expect(await column('a1')).toBe(await column('a2'))
+})
+
+test('a row\'s steppers visit only the levels the include toggles allow and stop at the ends; on an agent not yet seen they say wait', { options: { includeMax: false } }, async ($, on) => {
   const { row, click, band } = await rows($, on, { seen: false })
   await click('effort-a1-up')
   await click('effort-a1-up')
-  expect(await row('a1')).toBe('[-] [+] ▰▰▰▰▱ xhigh   Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe('[-] ▰▰▰▰▱ xhigh  [+]  Opus 5.5 · Explore · Find the config')
   // Max is off, so xhigh is the top: a press past it lights the word and leaves the level.
   await click('effort-a1-up')
-  expect(await row('a1')).toBe('[-] [+] ▰▰▰▰▱ xhigh   Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe('[-] ▰▰▰▰▱ xhigh  [+]  Opus 5.5 · Explore · Find the config')
   expect((await band.find({ type: 'Text', text: /^ xhigh/ }))?.props).toMatchObject({ color: 'text', bold: true })
   for (let i = 0; i < 5; i++) await click('effort-a1-down')
-  expect(await row('a1')).toBe('[-] [+] ▰▱▱▱▱ low     Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe('[-] ▰▱▱▱▱ low    [+]  Opus 5.5 · Explore · Find the config')
   await click('effort-a2-up')
-  expect(await row('a2')).toBe('[-] [+] ▱▱▱▱▱ wait    general-purpose · Fix the parser')
+  expect(await row('a2')).toBe('[-] ▱▱▱▱▱ wait   [+]  general-purpose · Fix the parser')
 })
 
-test('without mainThreadRow the band has no row for the main thread', async ($, on) => {
-  const { row } = await rows($, on)
+test('without mainThreadRow the band has no row for the main thread, and the footer shows its level', async ($, on) => {
+  const { row, footer } = await rows($, on)
   expect(await row('a1')).toBeDefined()
   expect(await row('main')).toBeUndefined()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
 })
 
 test('with mainThreadRow the band has a row for the main thread whose buttons step it as Alt+E does', { options: { mainThreadRow: true } }, async ($, on) => {
   const { sent, request, footer, row, click, view } = await rows($, on)
-  expect(await row('main')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · main thread')
+  expect(await row('main')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · main thread')
   await click('effort-main-down')
-  expect(await row('main')).toBe('[-] [+] ▰▰▱▱▱ medium  Opus 5.5 · main thread')
-  expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
-  expect(await row('a1')).toBe('[-] [+] ▰▰▱▱▱ medium  Opus 5.5 · Explore · Find the config')
+  expect(await row('main')).toBe('[-] ▰▰▱▱▱ medium [+]  Opus 5.5 · main thread')
+  // The band's row shows the main thread's level, so the footer leaves it out.
+  expect(await footer()).toBeUndefined()
+  expect(await row('a1')).toBe('[-] ▰▰▱▱▱ medium [+]  Opus 5.5 · Explore · Find the config')
   await request('high')
   expect(sent.at(-1)).toBe('main:medium')
   // In a subagent's view the rows give way to that agent's footer, the main thread's too.
   await view('a1')
   expect(await row('main')).toBeUndefined()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
 })
+
+// A band row as the person sees it: each stepper's own drawing in its place, then the rest of the row's text.
+async function rowText(band: any, id: string): Promise<string | undefined> {
+  const found = await band.find({ key: `effort-${id}` })
+  if (found === undefined) return undefined
+  const parts = await Promise.all(
+    (found.children as unknown[]).map(async child => {
+      const element = child as { type?: string; props?: { key?: string } }
+      return element.type === 'Client' ? flatten(await band.drawn({ in: element.props?.key })) : flatten(child)
+    }),
+  )
+  return parts.join('').trimEnd()
+}
+
+function flatten(element: unknown): string {
+  if (typeof element === 'string') return element
+  const { children = [] } = element as { children?: unknown[] }
+  return children.map(flatten).join('')
+}

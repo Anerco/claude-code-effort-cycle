@@ -15,6 +15,6 @@
     "includeHigh": { "type": "boolean", "title": "Effort keys: include high", "description": "Alt+E and Alt+Shift+E step through high.", "default": true },
     "includeXhigh": { "type": "boolean", "title": "Effort keys: include xhigh", "description": "Alt+E and Alt+Shift+E step through xhigh.", "default": true },
     "includeMax": { "type": "boolean", "title": "Effort keys: include max", "description": "Alt+E and Alt+Shift+E step through max.", "default": true },
-    "mainThreadRow": { "type": "boolean", "title": "Effort band: row for the main thread", "description": "Adds a row for the main thread to the band above the prompt, above the subagents' rows, with [-] and [+] that step its effort as Alt+E and Alt+Shift+E do.", "default": false }
+    "mainThreadRow": { "type": "boolean", "title": "Effort band: row for the main thread", "description": "Adds a row for the main thread to the band above the prompt, above the subagents' rows, with [-] and [+] that step its effort as Alt+E and Alt+Shift+E do; the footer then leaves the main thread's meter to that row.", "default": false }
   }
 }

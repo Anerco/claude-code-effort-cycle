@@ -11,12 +11,13 @@ import type { AgentEffort } from '../types'
 // blocks a press filled or emptied lit for a moment) the moment either changes,
 // and a line under each Agent call shows the level of the agent it started.
 // While the main thread is in view, the band above the prompt has a row per
-// live subagent with its level and a [-] and [+] that step it
-// (`[-] [+] ▰▰▱▱▱ medium  Sonnet 5.5 · Explore · <task>`), gone when the agent
+// live subagent with its level between a [-] and a [+] that step it
+// (`[-] ▰▰▱▱▱ medium [+]  Sonnet 5.5 · Explore · <task>`), gone when the agent
 // ends; a poll of `$.agent.list()` says which are live. /config's
-// mainThreadRow adds one for the main thread above them. The buttons are
-// clicked, or walked with Tab and pressed with Enter once ctrl+x tab focuses
-// the band; they take no key from the prompt.
+// mainThreadRow adds one for the main thread above them, and the footer then
+// leaves the main thread's meter to it. The steppers are clicked, each press
+// one step: they are Clients (./stepper.tsx), whose presses the engine neither
+// counts as double clicks nor turns into a selection, and they take no key.
 // A press past either end lights the word instead. At max the model name turns
 // red too, and while Claude works a light sweeps across the bar. The keys step only
 // through the levels /config's five include toggles allow, for every model.
@@ -134,9 +135,11 @@ export const register: Register = (on, options) => {
     return ran
   })
 
-  on('ui.render', { component: 'SessionMode' }, async ($, e) => {
+  on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     await $.state.get(drawnModel)
     const agentId = (await $.state.get({ ...viewed, id: e.surface })).value ?? null
+    // The band's own row shows the main thread's level, so the footer draws only the engine's modes.
+    if (agentId === null && options['mainThreadRow'] === true) return next(e)
     const pressed = (await $.state.get(flash)).value ?? null
     const head = (await $.state.get(swept)).value ?? null
     const { model, level, label } = await shown($, agentId)
@@ -176,22 +179,31 @@ export const register: Register = (on, options) => {
     const pressed = rows.length > 0 ? ((await $.state.get(flash)).value ?? null) : null
     // The band is shared: what the plugins beneath and Claude Code's surveys draw there stays, the buttons hidden beside it.
     const below = await next(e)
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Text, Button } = ui
+    // The band is drawn on the terminal and the desktop, which both draw Clients; a surface without them gets no rows.
+    const Client = 'Client' in ui ? ui.Client : undefined
     return (
       <Box flexDirection="column">
-        {rows.map(row => {
+        {Client !== undefined && rows.map(row => {
           // The main thread's row steps it as Alt+E does on main; a subagent's, that agent alone.
           const target = row.id === MAIN ? null : row.id
+          const lit = litFor(pressed, target)
+          // A stepper either side of the meter and its word, which is as wide as the widest level, so every row's
+          // [+] stands in one column; only the model, name and task after it are cut to fit.
           return (
             <Box key={`effort-${row.id}`} flexDirection="row">
-              <Button key={`effort-${row.id}-down`} label="[-]" plain dimColor onPress={() => stepAgent($, options, -1, target)} />
-              <Text> </Text>
-              <Button key={`effort-${row.id}-up`} label="[+]" plain dimColor onPress={() => stepAgent($, options, 1, target)} />
-              <Box key={`effort-${row.id}-level`} flexShrink={1}>
-                <Text wrap="truncate-end">
+              <Client key={`effort-${row.id}-down`} module="./stepper.tsx" props={{ label: '[-]', by: -1, agentId: target }} width={3} height={1} />
+              <Box key={`effort-${row.id}-level`} flexShrink={0}>
+                <Text>
                   {' '}
-                  {meter(row.level, litFor(pressed, target))}
-                  {word(row.level, litFor(pressed, target))}
+                  {meter(row.level, lit)}
+                  {word(row.level, lit)}{' '}
+                </Text>
+              </Box>
+              <Client key={`effort-${row.id}-up`} module="./stepper.tsx" props={{ label: '[+]', by: 1, agentId: target }} width={3} height={1} />
+              <Box key={`effort-${row.id}-about`} flexShrink={1}>
+                <Text wrap="truncate-end">
                   {'  '}
                   {row.model !== undefined && <Text dimColor>{displayName(row.model)} · </Text>}
                   {row.label}
@@ -208,6 +220,13 @@ export const register: Register = (on, options) => {
         </Box>
       </Box>
     )
+  })
+
+  // A row's stepper was pressed: one step of its agent (null: the main thread), as a key press makes.
+  on('ui.message', async ($, e, next) => {
+    const asked = stepOf(e.module, e.data)
+    if (asked !== undefined) await stepAgent($, options, asked.by, asked.agentId)
+    return next(e)
   })
 
   // Under an Agent call, the level of the agent it started, once a request of its has said it.
@@ -354,6 +373,14 @@ async function agentRows($: Engine): Promise<Row[]> {
       return { ...agent, ...(held === undefined ? {} : { model: held.model }), level: held === undefined ? null : agentLevel(held) }
     }),
   )
+}
+
+// What a stepper posted, read back as a step: which way and whose; undefined for anything else.
+function stepOf(module: string, data: unknown): { by: 1 | -1; agentId: string | null } | undefined {
+  if (!module.endsWith('stepper.tsx') || typeof data !== 'object' || data === null) return undefined
+  const { by, agentId } = data as { by?: unknown; agentId?: unknown }
+  if ((by !== 1 && by !== -1) || (agentId !== null && typeof agentId !== 'string')) return undefined
+  return { by, agentId }
 }
 
 // The latest press, when it stepped this agent (null: the main thread): what lights its meter.
