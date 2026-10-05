@@ -8,10 +8,14 @@ In ~/.claude/settings.json:
 Claude Code runs it every five seconds while the session has subagents, with the rows' context as JSON
 on stdin, and draws each line it prints, `{"id": "<agent id>", "content": "<text>"}`, in place of that
 agent's row. A row reads the agent's name (the Agent call's description), then what each plugin left
-for that agent, then what it is doing (its progress summary), joined by ` · ` and cut to the row's
-width, its activity first:
+for that agent, then what it is doing (its progress summary), then, dim, how long it has run and its
+tokens as Claude Code's own row shows them, joined by ` · `:
 
-    Fix the parser · ‹▰▰▰▱▱› high · ⎇4 ahead 3 files · Reading failing note test in chat.spec.ts
+    Fix the parser · ‹▰▰▰▱▱› high · ⎇4 ahead 3 files · Reading failing note test · 53m 11s · ↓ 499.8k tokens
+
+A row too wide for the list loses its tokens, then its time, then is cut in its activity, then in its
+name, then loses plugins' parts from the end. The time shows only while the agent runs: the context
+gives when an agent started, not when it ended.
 
 Plugins leave their parts in ~/.claude/subagent-rows/sessions/<session id>/<plugin>.json, one file
 each, `{"order": 10, "agents": {"<agent id>": "<text>"}}`; the parts join by `order`, then by file
@@ -35,6 +39,9 @@ MIN_ACTIVITY = 8
 # The fewest cells the name keeps before parts are dropped from the end.
 MIN_NAME = 8
 ANSI = re.compile(r"\x1b\[[0-9;]*m")
+DIM, UNDIM = "\x1b[2m", "\x1b[22m"
+# The statuses whose time still runs.
+RUNNING = ("running", "pending")
 
 
 def cells(text):
@@ -56,6 +63,45 @@ def cut(text, width):
     return out.rstrip() + "…" if width > 0 else ""
 
 
+def elapsed(ms):
+    """A duration as Claude Code writes one: 12s, 53m 11s, 1h 4m 2s, 2d 3h 0m."""
+    if ms < 60000:
+        return f"{int(ms // 1000)}s"
+    d, h, m = int(ms // 86400000), int(ms % 86400000 // 3600000), int(ms % 3600000 // 60000)
+    s = round(ms % 60000 / 1000)
+    if s == 60:
+        s, m = 0, m + 1
+    if m == 60:
+        m, h = 0, h + 1
+    if h == 24:
+        h, d = 0, d + 1
+    if d:
+        return f"{d}d {h}h {m}m"
+    if h:
+        return f"{h}h {m}m {s}s"
+    return f"{m}m {s}s"
+
+
+def tokens(count):
+    """A token count as Claude Code writes one: 523, 1.0k, 499.8k, 1.2m."""
+    if count < 1000:
+        return str(count)
+    # The smallest unit that keeps it under 1000 once rounded: 999,960 is 1.0m, not 1000.0k.
+    for unit, letter in ((1e3, "k"), (1e6, "m"), (1e9, "b"), (1e12, "t")):
+        shown = round(count / unit, 1)
+        if shown < 1000 or letter == "t":
+            return f"{shown:.1f}{letter}"
+
+
+def stats(task, now_ms):
+    """The row's time and tokens, each a choice the row may drop: all of them, the time alone, none."""
+    ran = elapsed(max(0, now_ms - task["startTime"])) if task.get("status") in RUNNING and task.get("startTime") else ""
+    count = task.get("tokenCount") or 0
+    used = f"↓ {tokens(count)} tokens" if count > 0 else ""
+    both = SEP.join(p for p in (ran, used) if p)
+    return [c for c in dict.fromkeys([both, ran, ""])]
+
+
 def fragments(session_id):
     """Each plugin's parts for this session, in order: {agent id: text} per plugin."""
     folder = SESSIONS / session_id
@@ -71,9 +117,16 @@ def fragments(session_id):
     return [agents for _, _, agents in sorted(found, key=lambda f: (f[0], f[1]))]
 
 
-def row(name, parts, activity, width):
-    """The row's text in `width` cells: the activity cut first, then the name, then parts dropped from the end."""
+def row(name, parts, activity, width, tail=("",)):
+    """The row's text in `width` cells: its tail (time and tokens, dim) shortened first, through the choices
+    given, then the activity cut, then the name, then parts dropped from the end."""
     parts = [p for p in parts if p]
+    for end in tail:
+        if not end:
+            break
+        whole = SEP.join([name, *parts, *([activity] if activity else []), f"{DIM}{end}{UNDIM}"])
+        if cells(whole) <= width:
+            return whole
     fixed = cells(SEP.join([name, *parts]))
     if activity:
         room = width - fixed - len(SEP)
@@ -106,12 +159,14 @@ def main():
     session_id = str(context.get("session_id", ""))
     width = int(context.get("columns") or 80)
     plugins = fragments(session_id) if session_id else []
+    now_ms = time.time() * 1000
     for task in context.get("tasks", []):
         name = task.get("description") or task.get("name") or task.get("type") or "agent"
         label = task.get("label") or ""
         activity = "" if label == name else label
         parts = [str(agents[task["id"]]) for agents in plugins if task["id"] in agents]
-        print(json.dumps({"id": task["id"], "content": row(name, parts, activity, width)}, ensure_ascii=False))
+        content = row(name, parts, activity, width, stats(task, now_ms))
+        print(json.dumps({"id": task["id"], "content": content}, ensure_ascii=False))
     prune(session_id)
 
 

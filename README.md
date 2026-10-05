@@ -101,17 +101,19 @@ curl -fsSL https://raw.githubusercontent.com/Anerco/claude-code-effort-cycle/mai
 "subagentStatusLine": { "type": "command", "command": "python3 ~/.claude/subagent-rows/rows.py" }
 ```
 
-Each row then reads the Agent call's description, the agent's level and what
-it is doing, cut to fit, its activity first:
+Each row then reads the Agent call's description, the agent's level, what it
+is doing, and, dim, how long it has run and its tokens, as Claude Code's own
+row shows them:
 
 ```
-◯ Fix the parser · ‹▰▰▰▱▱› high · Reading failing note test in chat.spec.ts
+◯ Fix the parser · ‹▰▰▰▱▱› high · Reading failing note test · 53m 11s · ↓ 499.8k tokens
 ```
 
-Claude Code runs the command every five seconds while there are subagents, so
-a row follows an Alt+E press within that. The row takes the place of Claude
-Code's own, which also shows the agent's time and tokens; the main thread has
-no row there, and its level stays in the footer.
+A row too wide for the list drops its tokens, then its time, then is cut in
+its activity. The time shows only while the agent runs: the command is told
+when an agent started, not when it ended. Claude Code runs the command every
+five seconds while there are subagents, so a row follows an Alt+E press within
+that. The main thread has no row there, and its level stays in the footer.
 
 While the setting is there, the plugin writes each subagent's level to
 `~/.claude/subagent-rows/sessions/<session id>/effort-cycle.json` as
