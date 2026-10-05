@@ -1,8 +1,41 @@
 import { test, expect, mock } from 'claude-code/testing'
-import type { On, RenderElement } from 'claude-code'
+import type { Engine } from 'claude-code/testing'
+import type { AgentInfo, On, RenderElement, RenderPropsOf } from 'claude-code'
 
 // Claude Code's own band, beneath every plugin: empty here, as with no survey up.
 const engineBand = (on: On) => on('ui.render', { component: 'AbovePrompt' }, (): RenderElement => ({ type: 'Box', children: [] }))
+const BAND: RenderPropsOf['AbovePrompt'] = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120, scroll: { offset: 0, bodyRows: 19 }, view: {} }
+const agent = (id: string, type: string): AgentInfo => ({ id, description: 'a task', type, status: 'running' })
+
+// A session on Opus 5.5 at high with two subagents, an Explore and a general-purpose; `sent` holds each
+// request's agent and effort as it left the plugin, and `view` opens a transcript as the tasks list does.
+async function world($: Engine, on: On) {
+  engineBand(on)
+  const clock = mock.clock(on)
+  on('settings.read', () => ({ value: { effortLevel: 'high' } }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  on('agent.list', () => ({ value: [agent('a1', 'Explore'), agent('a2', 'general-purpose')] }))
+  const sent: string[] = []
+  on('turn.step', async function* (_, e) {
+    sent.push(`${e.agentId ?? 'main'}:${e.effort}`)
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: null, usage: null }
+  })
+  const request = async (effort: string, agentId?: string) => {
+    const stream = $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-5-5', effort, messageCount: 1, ...(agentId && { agentId }) } as any)
+    for await (const _ of stream);
+  }
+  const band = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  const label = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  await clock.settle()
+  const footer = async () => (await label.find({ key: 'effort' }))?.text.trim()
+  const view = async (agentId?: string) => {
+    await band.redraw({ ...BAND, view: agentId === undefined ? {} : { agentId } })
+    await clock.settle()
+  }
+  const up = () => band.press({ key: 'effort-up' })
+  const down = () => band.press({ key: 'effort-down' })
+  return { clock, sent, request, footer, view, up, down }
+}
 
 test('Alt+E steps the level up and Alt+Shift+E down, stopping at the ends, the footer shows model and level, main-loop requests carry it, the engine taking over drops it', async ($, on) => {
   engineBand(on)
@@ -181,4 +214,71 @@ test('the band keeps what the plugins beneath draw there, and Alt+E and Alt+Shif
   await band.press({ key: 'effort-down' })
   expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
   expect(await theirs()).toBe('theirs')
+})
+
+test('each agent keeps its own level: the keys step the agent in view, the footer shows its level, its requests carry it', async ($, on) => {
+  const { sent, request, footer, view, up, down } = await world($, on)
+  // Explore starts at its definition's medium, the general-purpose agent at the high it inherits.
+  await request('medium', 'a1')
+  await request('high', 'a2')
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+
+  await view('a1')
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
+  await up()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▱▱ high')
+  await view('a2')
+  expect(await footer()).toBe('general-purpose · Opus 5.5 ▰▰▰▱▱ high')
+  await down()
+  await down()
+  expect(await footer()).toBe('general-purpose · Opus 5.5 ▰▱▱▱▱ low')
+  await view()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+  await up()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▱ xhigh')
+
+  await request('high')
+  await request('medium', 'a1')
+  await request('high', 'a2')
+  expect(sent.slice(2)).toEqual(['main:xhigh', 'a1:high', 'a2:low'])
+  await view('a1')
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▱▱ high')
+})
+
+test('an agent\'s meter is empty until its first request says its level, and a press leaves it; the engine changing its level drops the pick', async ($, on) => {
+  const { sent, request, footer, view, up } = await world($, on)
+  await view('a1')
+  expect(await footer()).toBe('Explore · ▱▱▱▱▱ —')
+  await up()
+  expect(await footer()).toBe('Explore · ▱▱▱▱▱ —')
+  await request('medium', 'a1')
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
+  await up()
+  await request('medium', 'a1')
+  // The engine sends it at low from now on (the person's /effort, inherited): its way wins, as on main.
+  await request('low', 'a1')
+  expect(sent).toEqual(['a1:medium', 'a1:high', 'a1:low'])
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▱▱▱▱ low')
+})
+
+test('the line under an Agent call shows the level of the agent it started, and follows the keys', async ($, on) => {
+  on('agent.spawn', (_, e) => ({ model: 'claude-opus-5-5', agentId: e.tool_use_id === 'toolu_a' ? 'a1' : 'a2' }))
+  on('ui.render', { component: 'ToolUse' }, (): RenderElement => ({ type: 'Box', props: { key: 'engine' }, children: [{ type: 'Text', children: ['Explore(Find the config)'] }] }))
+  const { request, view, up } = await world($, on)
+  await $.agent.spawn({ tool_use_id: 'toolu_a', description: 'Find the config', prompt: 'Find it.', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', background: false, fork: false } as any)
+  const row = await $.ui.mount({
+    plugin: 'effort-cycle', surface: 'terminal', component: 'ToolUse', requestId: 'toolu_a',
+    props: { tool_use_id: 'toolu_a', tool: 'Agent', input: { description: 'Find the config', prompt: 'Find it.', subagent_type: 'Explore' }, isRunning: true, isErrored: false, isInterrupted: false },
+  })
+  const line = async () => (await row.find({ key: 'effort' }))?.text
+
+  // Before the agent's first request the row is the engine's alone.
+  expect(await line()).toBeUndefined()
+  expect((await row.find({ key: 'engine' }))?.text).toBe('Explore(Find the config)')
+  await request('medium', 'a1')
+  expect(await line()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
+  await view('a1')
+  await up()
+  expect(await line()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+  expect((await row.find({ key: 'engine' }))?.text).toBe('Explore(Find the config)')
 })

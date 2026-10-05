@@ -7,7 +7,7 @@
   "supportUrl": "https://github.com/Anerco/claude-code-effort-cycle/issues",
   "privacyPolicyUrl": "https://github.com/Anerco/claude-code-effort-cycle#privacy",
   "license": "MIT",
-  "description": "Alt+E steps the effort level up and Alt+Shift+E down; the footer shows the model and level as they change",
+  "description": "Alt+E steps the effort level up and Alt+Shift+E down, for the main thread or the subagent in view; the footer shows that agent's model and level as they change",
   "types": "./types/index.d.ts",
   "userConfig": {
     "includeLow": { "type": "boolean", "title": "Effort keys: include low", "description": "Alt+E and Alt+Shift+E step through low.", "default": true },
