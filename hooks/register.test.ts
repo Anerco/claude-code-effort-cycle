@@ -305,32 +305,6 @@ test('two surfaces drawing the band keep their own view: the terminal in a subag
   expect(await remoteFooter()).toBe('Opus 5.5 ▰▰▰▱▱ high')
 })
 
-test('with the main thread in view the band has a row per live subagent with its level, gone in a subagent\'s view and when the agent ends', async ($, on) => {
-  const { clock, band, listed, request, view, up } = await world($, on)
-  const row = (id: string) => rowText(band, id)
-  await request('medium', 'a1')
-  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as any)
-  await clock.settle()
-
-  expect(await row('a1')).toBe('[-] ▰▰▱▱▱ medium [+]  Opus 5.5 · Explore · Find the config')
-  // The general-purpose agent has made no request yet: its row says so.
-  expect(await row('a2')).toBe('[-] ▱▱▱▱▱ —      [+]  general-purpose · Fix the parser')
-  await request('high', 'a2')
-  expect(await row('a2')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · general-purpose · Fix the parser')
-
-  // In a subagent's view the rows give way to its footer, and a press there shows in its row back on main.
-  await view('a1')
-  expect(await row('a1')).toBeUndefined()
-  await up()
-  await view()
-  expect(await row('a1')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · Explore · Find the config')
-
-  listed[1] = { ...listed[1]!, status: 'completed' }
-  await clock.advance(2000)
-  expect(await row('a2')).toBeUndefined()
-  expect(await row('a1')).toBeDefined()
-})
-
 // The band's rows once the poll found the two subagents, Explore at medium and the general-purpose one at high unless asked to wait.
 async function rows($: Engine, on: On, { seen = true } = {}) {
   const w = await world($, on)
@@ -339,21 +313,45 @@ async function rows($: Engine, on: On, { seen = true } = {}) {
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as any)
   await w.clock.settle()
   const row = (id: string) => rowText(w.band, id)
-  // A click on a stepper as the terminal reports it: the button down, then up, in the stepper's cells.
-  const click = async (key: string) => {
-    await w.band.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: key })
-    await w.band.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: key })
+  const shown = async () => (await Promise.all(['main', 'a1', 'a2', 'a3'].map(row))).filter(text => text !== undefined)
+  // A press on a chevron as the terminal reports it, on one of its three cells: the button down, then up.
+  const click = async (key: string, x = 1) => {
+    await w.band.pointer({ type: 'down', x, y: 0, button: 'left', in: key })
+    await w.band.pointer({ type: 'up', x, y: 0, button: 'left', in: key })
   }
   const lit = async () => (await w.band.findAll({ type: 'Text', text: /^[▰▱]$/ })).filter(b => b.props.color === 'text' && b.props.bold).length
-  return { ...w, row, click, lit }
+  return { ...w, row, shown, click, lit }
 }
 
-test('a row\'s [-] and [+] step that agent alone, on its next requests, lighting the block they crossed', async ($, on) => {
+test('with the main thread in view the band has a row per live subagent, gone in a subagent\'s view and when the agent ends', async ($, on) => {
+  const { listed, request, view, up, clock, shown, row } = await rows($, on, { seen: false })
+  expect(await shown()).toEqual([
+    ' ‹ ▰▰▱▱▱ ›  medium  Explore           Opus 5.5  Find the config',
+    // The general-purpose agent has made no request yet: its row says so.
+    ' ‹ ▱▱▱▱▱ ›  —       general-purpose             Fix the parser',
+  ])
+  await request('high', 'a2')
+  expect(await row('a2')).toBe(' ‹ ▰▰▰▱▱ ›  high    general-purpose   Opus 5.5  Fix the parser')
+
+  // In a subagent's view the rows give way to its footer, and a press there shows in its row back on main.
+  await view('a1')
+  expect(await shown()).toEqual([])
+  await up()
+  await view()
+  expect(await row('a1')).toBe(' ‹ ▰▰▰▱▱ ›  high    Explore           Opus 5.5  Find the config')
+
+  listed[1] = { ...listed[1]!, status: 'completed' }
+  await clock.advance(2000)
+  expect(await row('a2')).toBeUndefined()
+  expect(await row('a1')).toBeDefined()
+})
+
+test('a row\'s chevrons step that agent alone, on its next requests, lighting the block they crossed', async ($, on) => {
   const { sent, request, footer, row, click, lit, clock } = await rows($, on)
   await click('effort-a1-up')
-  expect(await row('a1')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe(' ‹ ▰▰▰▱▱ ›  high    Explore           Opus 5.5  Find the config')
   expect(await lit()).toBe(1)
-  expect(await row('a2')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · general-purpose · Fix the parser')
+  expect(await row('a2')).toBe(' ‹ ▰▰▰▱▱ ›  high    general-purpose   Opus 5.5  Fix the parser')
   expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
   await clock.advance(1000)
   expect(await lit()).toBe(0)
@@ -364,38 +362,71 @@ test('a row\'s [-] and [+] step that agent alone, on its next requests, lighting
   expect(sent.slice(2)).toEqual(['main:high', 'a1:high', 'a2:medium'])
 })
 
-test('three quick clicks on a stepper step three times, then stop at the end', async ($, on) => {
+test('each chevron takes a press on any of its three cells, the chevron and a cell either side, and is drawn three cells wide', async ($, on) => {
+  const { row, click, ...w } = await rows($, on)
+  for (const x of [0, 1, 2]) await click('effort-a1-up', x)
+  expect(await row('a1')).toBe(' ‹ ▰▰▰▰▰ ›  max     Explore           Opus 5.5  Find the config')
+  for (const x of [0, 1, 2]) await click('effort-a1-down', x)
+  expect(await row('a1')).toBe(' ‹ ▰▰▱▱▱ ›  medium  Explore           Opus 5.5  Find the config')
+  const chevrons = (await w.band.findAll({ type: 'Client' })).filter(c => String(c.props.key).startsWith('effort-a1-'))
+  expect(chevrons.map(c => [c.props.key, c.props.width])).toEqual([['effort-a1-down', 3], ['effort-a1-up', 3]])
+})
+
+test('presses that overlap, or land while the band redraws and a step is still lit, each step once', async ($, on) => {
+  const { row, click, clock, view } = await rows($, on, { seen: false })
+  // Two presses whose steps run at once: each reads the level the other wrote.
+  await Promise.all([click('effort-a1-up'), click('effort-a1-up')])
+  expect(await row('a1')).toBe(' ‹ ▰▰▰▰▱ ›  xhigh   Explore           Opus 5.5  Find the config')
+  // Between redraws of the band, a view switch and the light of the last step.
+  await click('effort-a1-down')
+  await view()
+  await click('effort-a1-down')
+  await clock.advance(300)
+  await click('effort-a1-down')
+  await clock.advance(2000)
+  await click('effort-a1-up')
+  expect(await row('a1')).toBe(' ‹ ▰▰▱▱▱ ›  medium  Explore           Opus 5.5  Find the config')
+})
+
+test('a post the frame replaced still steps: each carries the chevron\'s running count of presses', async ($, on) => {
+  const { row, ...w } = await rows($, on)
+  const post = (presses: number) => w.band.post({ stepper: 'a1-down', presses, by: -1, agentId: 'a1' }, { in: 'effort-a1-down' })
+  // The first post heard counts every press so far; the posts of presses two and three were replaced by the fourth's.
+  await post(1)
+  expect(await row('a1')).toBe(' ‹ ▰▱▱▱▱ ›  low     Explore           Opus 5.5  Find the config')
+  await w.request('medium', 'a1')
+  await w.request('high', 'a1')
+  await post(4)
+  expect(await row('a1')).toBe(' ‹ ▰▱▱▱▱ ›  low     Explore           Opus 5.5  Find the config')
+  // A post heard twice steps nothing the second time.
+  await post(4)
+  await w.request('low', 'a1')
+  expect(await row('a1')).toBe(' ‹ ▰▱▱▱▱ ›  low     Explore           Opus 5.5  Find the config')
+})
+
+test('three quick presses on a chevron step three times, then stop at the end', async ($, on) => {
   const { sent, request, row, click } = await rows($, on)
   for (let i = 0; i < 3; i++) await click('effort-a1-up')
-  expect(await row('a1')).toBe('[-] ▰▰▰▰▰ max    [+]  Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe(' ‹ ▰▰▰▰▰ ›  max     Explore           Opus 5.5  Find the config')
   for (let i = 0; i < 3; i++) await click('effort-a1-up')
-  expect(await row('a1')).toBe('[-] ▰▰▰▰▰ max    [+]  Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe(' ‹ ▰▰▰▰▰ ›  max     Explore           Opus 5.5  Find the config')
   await request('medium', 'a1')
   expect(sent.at(-1)).toBe('a1:max')
 })
 
-test('a row reads [-], the meter and its word, [+], then model, name and task; the word as wide as the widest, so [+] stands in one column', { options: { mainThreadRow: true } }, async ($, on) => {
-  const { band, row } = await rows($, on)
-  const parts = (await band.find({ key: 'effort-a1' }))?.children.map(child => (child as { props: { key?: string } }).props.key)
-  expect(parts).toEqual(['effort-a1-down', 'effort-a1-level', 'effort-a1-up', 'effort-a1-about'])
-  const column = async (id: string) => (await row(id))?.indexOf('[+]')
-  expect(await column('main')).toBe(await column('a1'))
-  expect(await column('a1')).toBe(await column('a2'))
-})
-
-test('a row\'s steppers visit only the levels the include toggles allow and stop at the ends; on an agent not yet seen they say wait', { options: { includeMax: false } }, async ($, on) => {
-  const { row, click, band } = await rows($, on, { seen: false })
+test('a row\'s chevrons visit only the levels the include toggles allow and stop at the ends; on an agent not yet seen they say wait', { options: { includeMax: false } }, async ($, on) => {
+  const { row, click, ...w } = await rows($, on, { seen: false })
   await click('effort-a1-up')
   await click('effort-a1-up')
-  expect(await row('a1')).toBe('[-] ▰▰▰▰▱ xhigh  [+]  Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe(' ‹ ▰▰▰▰▱ ›  xhigh   Explore           Opus 5.5  Find the config')
   // Max is off, so xhigh is the top: a press past it lights the word and leaves the level.
   await click('effort-a1-up')
-  expect(await row('a1')).toBe('[-] ▰▰▰▰▱ xhigh  [+]  Opus 5.5 · Explore · Find the config')
-  expect((await band.find({ type: 'Text', text: /^ xhigh/ }))?.props).toMatchObject({ color: 'text', bold: true })
+  expect(await row('a1')).toBe(' ‹ ▰▰▰▰▱ ›  xhigh   Explore           Opus 5.5  Find the config')
+  expect((await w.band.find({ type: 'Text', text: /^ xhigh *$/ }))?.props).toMatchObject({ color: 'text', bold: true })
   for (let i = 0; i < 5; i++) await click('effort-a1-down')
-  expect(await row('a1')).toBe('[-] ▰▱▱▱▱ low    [+]  Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe(' ‹ ▰▱▱▱▱ ›  low     Explore           Opus 5.5  Find the config')
   await click('effort-a2-up')
-  expect(await row('a2')).toBe('[-] ▱▱▱▱▱ wait   [+]  general-purpose · Fix the parser')
+  expect(await row('a2')).toBe(' ‹ ▱▱▱▱▱ ›  wait    general-purpose             Fix the parser')
 })
 
 test('without mainThreadRow the band has no row for the main thread, and the footer shows its level', async ($, on) => {
@@ -405,37 +436,63 @@ test('without mainThreadRow the band has no row for the main thread, and the foo
   expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
 })
 
-test('with mainThreadRow the band has a row for the main thread whose buttons step it as Alt+E does', { options: { mainThreadRow: true } }, async ($, on) => {
-  const { sent, request, footer, row, click, view } = await rows($, on)
-  expect(await row('main')).toBe('[-] ▰▰▰▱▱ high   [+]  Opus 5.5 · main thread')
-  await click('effort-main-down')
-  expect(await row('main')).toBe('[-] ▰▰▱▱▱ medium [+]  Opus 5.5 · main thread')
-  // The band's row shows the main thread's level, so the footer leaves it out.
+test('with mainThreadRow levels live in the band: a main row leads, every row shows in any view, the viewed one marked, the footer meter gone', { options: { mainThreadRow: true } }, async ($, on) => {
+  const { sent, request, footer, shown, click, view } = await rows($, on)
+  expect(await shown()).toEqual([
+    '▸‹ ▰▰▰▱▱ ›  high    main thread       Opus 5.5',
+    ' ‹ ▰▰▱▱▱ ›  medium  Explore           Opus 5.5  Find the config',
+    ' ‹ ▰▰▰▱▱ ›  high    general-purpose   Opus 5.5  Fix the parser',
+  ])
   expect(await footer()).toBeUndefined()
-  expect(await row('a1')).toBe('[-] ▰▰▱▱▱ medium [+]  Opus 5.5 · Explore · Find the config')
+  await click('effort-main-down')
   await request('high')
   expect(sent.at(-1)).toBe('main:medium')
-  // In a subagent's view the rows give way to that agent's footer, the main thread's too.
+  // Inside the Explore agent: every row still shows, the mark follows the view, and any row steps its own agent.
   await view('a1')
-  expect(await row('main')).toBeUndefined()
-  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
+  expect(await shown()).toEqual([
+    ' ‹ ▰▰▱▱▱ ›  medium  main thread       Opus 5.5',
+    '▸‹ ▰▰▱▱▱ ›  medium  Explore           Opus 5.5  Find the config',
+    ' ‹ ▰▰▰▱▱ ›  high    general-purpose   Opus 5.5  Fix the parser',
+  ])
+  expect(await footer()).toBeUndefined()
+  await click('effort-a2-up')
+  await click('effort-main-up')
+  expect(await shown()).toEqual([
+    ' ‹ ▰▰▰▱▱ ›  high    main thread       Opus 5.5',
+    '▸‹ ▰▰▱▱▱ ›  medium  Explore           Opus 5.5  Find the config',
+    ' ‹ ▰▰▰▰▱ ›  xhigh   general-purpose   Opus 5.5  Fix the parser',
+  ])
 })
 
-// A band row as the person sees it: each stepper's own drawing in its place, then the rest of the row's text.
-async function rowText(band: any, id: string): Promise<string | undefined> {
+test('the columns line up across rows, each as wide as its widest entry, and only the task is cut', { options: { mainThreadRow: true } }, async ($, on) => {
+  const { listed, clock, shown, request, ...w } = await rows($, on)
+  listed.push(agent('a3', 'Plan', 'Design the export page'))
+  await clock.advance(2000)
+  await request('xhigh', 'a3')
+  const texts = await shown()
+  const at = (text: string, part: string) => text.indexOf(part)
+  expect(texts.map(text => at(text, 'Opus'))).toEqual(texts.map(() => at(texts[0]!, 'Opus')))
+  expect(at(texts[1]!, 'Find')).toBe(at(texts[3]!, 'Design'))
+  const parts = (await w.band.find({ key: 'effort-a3' }))?.children.map(child => (child as { props: { key?: string; flexShrink?: number } }).props)
+  expect(parts?.map(part => [part.key, part.flexShrink])).toEqual([
+    ['effort-a3-down-cell', 0],
+    ['effort-a3-meter', 0],
+    ['effort-a3-up-cell', 0],
+    ['effort-a3-columns', 0],
+    ['effort-a3-task', 1],
+  ])
+})
+
+// A band row as the person sees it: each chevron's own drawing in its place among the row's text.
+async function rowText(band: { find: (q: { key: string }) => Promise<{ children: unknown[] } | undefined>; drawn: (scope?: { in?: string }) => Promise<unknown> }, id: string): Promise<string | undefined> {
   const found = await band.find({ key: `effort-${id}` })
   if (found === undefined) return undefined
-  const parts = await Promise.all(
-    (found.children as unknown[]).map(async child => {
-      const element = child as { type?: string; props?: { key?: string } }
-      return element.type === 'Client' ? flatten(await band.drawn({ in: element.props?.key })) : flatten(child)
-    }),
-  )
-  return parts.join('').trimEnd()
+  const text = async (element: unknown): Promise<string> => {
+    if (typeof element === 'string') return element
+    const { type, props, children = [] } = element as { type?: string; props?: { key?: string }; children?: unknown[] }
+    if (type === 'Client') return text(await band.drawn({ in: props?.key }))
+    return (await Promise.all(children.map(text))).join('')
+  }
+  return (await text(found)).trimEnd()
 }
 
-function flatten(element: unknown): string {
-  if (typeof element === 'string') return element
-  const { children = [] } = element as { children?: unknown[] }
-  return children.map(flatten).join('')
-}

@@ -35,6 +35,8 @@ declare module 'claude-code' {
       viewedOn: StateFamily<string | null>
       /** The subagents that are live (pending, running, waiting or idle), as the last poll of `$.agent.list()` found them. */
       live: LiveAgent[]
+      /** The running count of presses each band chevron last posted, by the chevron's id, so a later post steps by how far it moved. */
+      pressesSeen: StateFamily<number>
       /** The model the footer label last drew; a change (/model, alt+p) draws it again. */
       drawnModel: string
       /** The step Alt+E or Alt+Shift+E just made, as level indexes, whose blocks the meter lights for a moment (`from` equal to `to` is a press past the end, which lights the word); `id` counts the presses so only the latest clears it; `agentId` is the agent it stepped, null for the main thread. */

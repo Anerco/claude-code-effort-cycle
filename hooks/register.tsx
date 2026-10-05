@@ -10,14 +10,17 @@ import type { AgentEffort } from '../types'
 // a subagent's led by its type, the meter and word colored cool to hot, the
 // blocks a press filled or emptied lit for a moment) the moment either changes,
 // and a line under each Agent call shows the level of the agent it started.
-// While the main thread is in view, the band above the prompt has a row per
-// live subagent with its level between a [-] and a [+] that step it
-// (`[-] ▰▰▱▱▱ medium [+]  Sonnet 5.5 · Explore · <task>`), gone when the agent
-// ends; a poll of `$.agent.list()` says which are live. /config's
-// mainThreadRow adds one for the main thread above them, and the footer then
-// leaves the main thread's meter to it. The steppers are clicked, each press
-// one step: they are Clients (./stepper.tsx), whose presses the engine neither
-// counts as double clicks nor turns into a selection, and they take no key.
+// The band above the prompt has a row per live subagent, its meter between a
+// `‹` and a `›` that step it, then its level and three aligned columns, who,
+// model and task (`▸‹ ▰▰▱▱▱ ›  medium  Explore   Sonnet 5.5  Find the config`),
+// gone when the agent ends; a poll of `$.agent.list()` says which are live.
+// With /config's mainThreadRow off the rows show while the main thread is in
+// view. With it on, levels live in the band: a row for the main thread leads
+// them, every row shows in any view, the row of the agent this surface views is
+// marked `▸`, and the footer draws no meter. The chevrons are clicked, each
+// press one step: they are Clients (./stepper.tsx), whose presses the engine
+// neither counts as double clicks nor turns into a selection, and they take no
+// key. Steps from the keys and the chevrons run one at a time.
 // A press past either end lights the word instead. At max the model name turns
 // red too, and while Claude works a light sweeps across the bar. The keys step only
 // through the levels /config's five include toggles allow, for every model.
@@ -60,6 +63,7 @@ const live = { plugin: 'effort-cycle', key: 'live' } as const
 const drawnModel = { plugin: 'effort-cycle', key: 'drawnModel' } as const
 const flash = { plugin: 'effort-cycle', key: 'flash' } as const
 const swept = { plugin: 'effort-cycle', key: 'swept' } as const
+const pressesSeen = { plugin: 'effort-cycle', key: 'pressesSeen' } as const
 
 // The label's color per level, by theme key, so it follows the person's theme: cool to hot.
 const HEAT: Record<string, string> = { low: 'inactive', medium: 'success', high: 'warning', xhigh: 'claude', max: 'error' }
@@ -72,6 +76,9 @@ const WAIT = 'wait'
 // How often the band's rows ask which subagents are live, and the statuses that are.
 const POLL_MS = 2000
 const LIVE: readonly AgentInfo['status'][] = ['pending', 'running', 'waiting', 'idle']
+// The band's who and model columns grow with their widest entry up to these.
+const WHO_MAX = 20
+const MODEL_MAX = 14
 // The sweep moves one block per step, as a terminal draws it, then rests: 5 steps of 85ms in each 1530ms.
 const SWEEP_STEP_MS = 85
 const SWEEP_STEPS = 18
@@ -138,8 +145,8 @@ export const register: Register = (on, options) => {
   on('ui.render', { component: 'SessionMode' }, async ($, e, next) => {
     await $.state.get(drawnModel)
     const agentId = (await $.state.get({ ...viewed, id: e.surface })).value ?? null
-    // The band's own row shows the main thread's level, so the footer draws only the engine's modes.
-    if (agentId === null && options['mainThreadRow'] === true) return next(e)
+    // Levels live in the band, the agent in view's row among them, so the footer draws only the engine's modes.
+    if (options['mainThreadRow'] === true) return next(e)
     const pressed = (await $.state.get(flash)).value ?? null
     const head = (await $.state.get(swept)).value ?? null
     const { model, level, label } = await shown($, agentId)
@@ -169,13 +176,7 @@ export const register: Register = (on, options) => {
     if (model !== (await $.state.get(drawnModel)).value) $.clock.after(0, () => void $.state.set(drawnModel, model))
     if (agentId !== ((await $.state.get(here)).value ?? null)) $.clock.after(0, () => void $.state.set(here, agentId))
     if (e.props.isWorking !== (sweeper !== undefined)) $.clock.after(0, () => sweep($, e.props.isWorking, e.surface))
-    // With the main thread in view, a row per live subagent, and the main thread's own when /config asks for
-    // it; in a subagent's, the footer is that agent's.
-    const isMainInView = agentId === null && !e.props.hasSurvey
-    const rows: Row[] = [
-      ...(isMainInView && options['mainThreadRow'] === true ? [{ id: MAIN, label: 'main thread', model, level: await effortFor($, model) }] : []),
-      ...(isMainInView ? await agentRows($) : []),
-    ]
+    const rows = e.props.hasSurvey ? [] : await bandRows($, options, model, agentId)
     const pressed = rows.length > 0 ? ((await $.state.get(flash)).value ?? null) : null
     // The band is shared: what the plugins beneath and Claude Code's surveys draw there stays, the buttons hidden beside it.
     const below = await next(e)
@@ -183,33 +184,45 @@ export const register: Register = (on, options) => {
     const { Box, Text, Button } = ui
     // The band is drawn on the terminal and the desktop, which both draw Clients; a surface without them gets no rows.
     const Client = 'Client' in ui ? ui.Client : undefined
+    const width = columns(rows)
     return (
       <Box flexDirection="column">
         {Client !== undefined && rows.map(row => {
           // The main thread's row steps it as Alt+E does on main; a subagent's, that agent alone.
           const target = row.id === MAIN ? null : row.id
           const lit = litFor(pressed, target)
-          // A stepper either side of the meter and its word, which is as wide as the widest level, so every row's
-          // [+] stands in one column; only the model, name and task after it are cut to fit.
+          // The gutter marks the agent this surface views; it is the down chevron's left cell, so the chevron takes a
+          // press on either side of it. Every part but the task is fixed width, so the columns line up and only the
+          // task is cut to fit.
+          const mark = row.id === (agentId ?? MAIN) ? '▸' : ' '
           return (
             <Box key={`effort-${row.id}`} flexDirection="row">
-              <Client key={`effort-${row.id}-down`} module="./stepper.tsx" props={{ label: '[-]', by: -1, agentId: target }} width={3} height={1} />
-              <Box key={`effort-${row.id}-level`} flexShrink={0}>
+              <Box key={`effort-${row.id}-down-cell`} flexShrink={0}>
+                <Client key={`effort-${row.id}-down`} module="./stepper.tsx" props={{ before: mark, glyph: '‹', after: ' ', by: -1, agentId: target }} width={3} height={1} />
+              </Box>
+              <Box key={`effort-${row.id}-meter`} flexShrink={0}>
+                <Text>{meter(row.level, lit)}</Text>
+              </Box>
+              <Box key={`effort-${row.id}-up-cell`} flexShrink={0}>
+                <Client key={`effort-${row.id}-up`} module="./stepper.tsx" props={{ before: ' ', glyph: '›', after: ' ', by: 1, agentId: target }} width={3} height={1} />
+              </Box>
+              <Box key={`effort-${row.id}-columns`} flexShrink={0}>
                 <Text>
-                  {' '}
-                  {meter(row.level, lit)}
-                  {word(row.level, lit)}{' '}
-                </Text>
-              </Box>
-              <Client key={`effort-${row.id}-up`} module="./stepper.tsx" props={{ label: '[+]', by: 1, agentId: target }} width={3} height={1} />
-              <Box key={`effort-${row.id}-about`} flexShrink={1}>
-                <Text wrap="truncate-end">
+                  {word(row.level, lit)}
                   {'  '}
-                  {row.model !== undefined && <Text dimColor>{displayName(row.model)} · </Text>}
-                  {row.label}
-                  {row.description !== undefined && <Text dimColor> · {row.description}</Text>}
+                  {fit(row.label, width.who)}
+                  {'   '}
+                  <Text dimColor>{fit(row.model === undefined ? '' : displayName(row.model), width.model)}</Text>
                 </Text>
               </Box>
+              {row.description !== undefined && (
+                <Box key={`effort-${row.id}-task`} flexShrink={1}>
+                  <Text dimColor wrap="truncate-end">
+                    {'  '}
+                    {row.description}
+                  </Text>
+                </Box>
+              )}
             </Box>
           )
         })}
@@ -222,10 +235,19 @@ export const register: Register = (on, options) => {
     )
   })
 
-  // A row's stepper was pressed: one step of its agent (null: the main thread), as a key press makes.
+  // A row's chevron was pressed: as many steps of its agent (null: the main thread) as its count moved since the
+  // last post this module heard from it, so a press whose post the frame replaced still steps.
   on('ui.message', async ($, e, next) => {
     const asked = stepOf(e.module, e.data)
-    if (asked !== undefined) await stepAgent($, options, asked.by, asked.agentId)
+    if (asked !== undefined)
+      await serially(async () => {
+        const seen = { ...pressesSeen, id: asked.stepper }
+        const before = (await $.state.get(seen)).value
+        // A count below the last one heard is a new count (the chevron's module loaded again): all of it is new.
+        const steps = before === undefined || asked.presses < before ? asked.presses : asked.presses - before
+        await $.state.set(seen, asked.presses)
+        for (let i = 0; i < Math.min(steps, LEVELS.length); i++) await stepAgent($, options, asked.by, asked.agentId)
+      })
     return next(e)
   })
 
@@ -267,9 +289,17 @@ async function agentStep($: Engine, agentId: string, model: string, effort: stri
   return level === null ? null : now.override
 }
 
-// Alt+E and Alt+Shift+E: a step of the agent the surface's footer shows.
+// Alt+E and Alt+Shift+E: a step of the agent the surface views.
 async function step($: Engine, options: PluginOptions, by: 1 | -1, surface: string) {
-  await stepAgent($, options, by, (await $.state.get({ ...viewed, id: surface })).value ?? null)
+  await serially(async () => stepAgent($, options, by, (await $.state.get({ ...viewed, id: surface })).value ?? null))
+}
+
+// Runs steps one after another: each reads the level the last one wrote, so two presses close together make two.
+let queue: Promise<unknown> = Promise.resolve()
+function serially<T>(work: () => Promise<T>): Promise<T> {
+  const run = queue.then(work, work)
+  queue = run.catch(() => undefined)
+  return run
 }
 
 // The next allowed level above (or below) the agent's current one (null: the main thread); past the end the
@@ -375,12 +405,45 @@ async function agentRows($: Engine): Promise<Row[]> {
   )
 }
 
-// What a stepper posted, read back as a step: which way and whose; undefined for anything else.
-function stepOf(module: string, data: unknown): { by: 1 | -1; agentId: string | null } | undefined {
+// What a chevron posted, read back: which chevron, its running count of presses, which way and whose;
+// undefined for anything else.
+function stepOf(module: string, data: unknown): { stepper: string; presses: number; by: 1 | -1; agentId: string | null } | undefined {
   if (!module.endsWith('stepper.tsx') || typeof data !== 'object' || data === null) return undefined
-  const { by, agentId } = data as { by?: unknown; agentId?: unknown }
+  const { stepper, presses, by, agentId } = data as { stepper?: unknown; presses?: unknown; by?: unknown; agentId?: unknown }
+  if (typeof stepper !== 'string' || typeof presses !== 'number' || !Number.isInteger(presses) || presses < 0) return undefined
   if ((by !== 1 && by !== -1) || (agentId !== null && typeof agentId !== 'string')) return undefined
-  return { by, agentId }
+  return { stepper, presses, by, agentId }
+}
+
+// The band's rows. With levels in the band (mainThreadRow): the main thread's, every live subagent's, and the
+// agent in view's should it be live no longer. Otherwise the live subagents', while the main thread is in view.
+async function bandRows($: Engine, options: PluginOptions, model: string, agentId: string | null): Promise<Row[]> {
+  if (options['mainThreadRow'] !== true) return agentId === null ? agentRows($) : []
+  const subagents = await agentRows($)
+  const main: Row = { id: MAIN, label: 'main thread', model, level: await effortFor($, model) }
+  const isListed = agentId === null || subagents.some(row => row.id === agentId)
+  return [main, ...subagents, ...(isListed ? [] : [await viewedRow($, agentId)])]
+}
+
+// The row of a subagent in view that is live no longer: what its requests left of it.
+async function viewedRow($: Engine, agentId: string): Promise<Row> {
+  const held = (await $.state.get({ ...agents, id: agentId })).value
+  const label = held?.label ?? (await labelFor($, agentId)) ?? 'subagent'
+  return { id: agentId, label, ...(held === undefined ? {} : { model: held.model }), level: held === undefined ? null : agentLevel(held) }
+}
+
+// The who and model columns' widths: each as wide as its widest entry now, within a cap.
+function columns(rows: Row[]): { who: number; model: number } {
+  const widest = (texts: string[], cap: number) => Math.min(cap, Math.max(0, ...texts.map(text => text.length)))
+  return {
+    who: widest(rows.map(row => row.label), WHO_MAX),
+    model: widest(rows.map(row => (row.model === undefined ? '' : displayName(row.model))), MODEL_MAX),
+  }
+}
+
+// A column's text at its width: padded, or cut with an ellipsis.
+function fit(text: string, width: number): string {
+  return text.length > width ? `${text.slice(0, Math.max(0, width - 1))}…` : text.padEnd(width)
 }
 
 // The latest press, when it stepped this agent (null: the main thread): what lights its meter.
