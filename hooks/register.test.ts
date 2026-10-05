@@ -309,21 +309,85 @@ test('with the main thread in view the band has a row per live subagent with its
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as any)
   await clock.settle()
 
-  expect(await row('a1')).toBe('▰▰▱▱▱ medium  Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe('[-] [+] ▰▰▱▱▱ medium  Opus 5.5 · Explore · Find the config')
   // The general-purpose agent has made no request yet: its row says so.
-  expect(await row('a2')).toBe('▱▱▱▱▱ —       general-purpose · Fix the parser')
+  expect(await row('a2')).toBe('[-] [+] ▱▱▱▱▱ —       general-purpose · Fix the parser')
   await request('high', 'a2')
-  expect(await row('a2')).toBe('▰▰▰▱▱ high    Opus 5.5 · general-purpose · Fix the parser')
+  expect(await row('a2')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · general-purpose · Fix the parser')
 
   // In a subagent's view the rows give way to its footer, and a press there shows in its row back on main.
   await view('a1')
   expect(await row('a1')).toBeUndefined()
   await up()
   await view()
-  expect(await row('a1')).toBe('▰▰▰▱▱ high    Opus 5.5 · Explore · Find the config')
+  expect(await row('a1')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · Explore · Find the config')
 
   listed[1] = { ...listed[1]!, status: 'completed' }
   await clock.advance(2000)
   expect(await row('a2')).toBeUndefined()
   expect(await row('a1')).toBeDefined()
+})
+
+// The band's rows once the poll found the two subagents, Explore at medium and the general-purpose one at high unless asked to wait.
+async function rows($: Engine, on: On, { seen = true } = {}) {
+  const w = await world($, on)
+  await w.request('medium', 'a1')
+  if (seen) await w.request('high', 'a2')
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true } as any)
+  await w.clock.settle()
+  const row = async (id: string) => (await w.band.find({ key: `effort-${id}` }))?.text
+  const click = (key: string) => w.band.press({ key })
+  const lit = async () => (await w.band.findAll({ type: 'Text', text: /^[▰▱]$/ })).filter(b => b.props.color === 'text' && b.props.bold).length
+  return { ...w, row, click, lit }
+}
+
+test('a row\'s [-] and [+] step that agent alone, on its next requests, lighting the block they crossed', async ($, on) => {
+  const { sent, request, footer, row, click, lit, clock } = await rows($, on)
+  await click('effort-a1-up')
+  expect(await row('a1')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · Explore · Find the config')
+  expect(await lit()).toBe(1)
+  expect(await row('a2')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · general-purpose · Fix the parser')
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+  await clock.advance(1000)
+  expect(await lit()).toBe(0)
+  await click('effort-a2-down')
+  await request('high')
+  await request('medium', 'a1')
+  await request('high', 'a2')
+  expect(sent.slice(2)).toEqual(['main:high', 'a1:high', 'a2:medium'])
+})
+
+test('a row\'s buttons visit only the levels the include toggles allow and stop at the ends; on an agent not yet seen they say wait', { options: { includeMax: false } }, async ($, on) => {
+  const { row, click, band } = await rows($, on, { seen: false })
+  await click('effort-a1-up')
+  await click('effort-a1-up')
+  expect(await row('a1')).toBe('[-] [+] ▰▰▰▰▱ xhigh   Opus 5.5 · Explore · Find the config')
+  // Max is off, so xhigh is the top: a press past it lights the word and leaves the level.
+  await click('effort-a1-up')
+  expect(await row('a1')).toBe('[-] [+] ▰▰▰▰▱ xhigh   Opus 5.5 · Explore · Find the config')
+  expect((await band.find({ type: 'Text', text: /^ xhigh/ }))?.props).toMatchObject({ color: 'text', bold: true })
+  for (let i = 0; i < 5; i++) await click('effort-a1-down')
+  expect(await row('a1')).toBe('[-] [+] ▰▱▱▱▱ low     Opus 5.5 · Explore · Find the config')
+  await click('effort-a2-up')
+  expect(await row('a2')).toBe('[-] [+] ▱▱▱▱▱ wait    general-purpose · Fix the parser')
+})
+
+test('without mainThreadRow the band has no row for the main thread', async ($, on) => {
+  const { row } = await rows($, on)
+  expect(await row('a1')).toBeDefined()
+  expect(await row('main')).toBeUndefined()
+})
+
+test('with mainThreadRow the band has a row for the main thread whose buttons step it as Alt+E does', { options: { mainThreadRow: true } }, async ($, on) => {
+  const { sent, request, footer, row, click, view } = await rows($, on)
+  expect(await row('main')).toBe('[-] [+] ▰▰▰▱▱ high    Opus 5.5 · main thread')
+  await click('effort-main-down')
+  expect(await row('main')).toBe('[-] [+] ▰▰▱▱▱ medium  Opus 5.5 · main thread')
+  expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
+  expect(await row('a1')).toBe('[-] [+] ▰▰▱▱▱ medium  Opus 5.5 · Explore · Find the config')
+  await request('high')
+  expect(sent.at(-1)).toBe('main:medium')
+  // In a subagent's view the rows give way to that agent's footer, the main thread's too.
+  await view('a1')
+  expect(await row('main')).toBeUndefined()
 })

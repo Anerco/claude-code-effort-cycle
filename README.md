@@ -16,7 +16,10 @@ keyboard, per agent, without leaving a row in the transcript:
   `Explore · Opus 5.5 ▰▰▱▱▱ medium`.
 - While the main thread is in view, the band above the prompt has a row per
   live subagent with its level, gone when the agent ends:
-  `▰▰▱▱▱ medium  Sonnet 5.5 · Explore · Find the config`.
+  `[-] [+] ▰▰▱▱▱ medium  Sonnet 5.5 · Explore · Find the config`. Its **[-]**
+  and **[+]** step that agent's level: click them, or press **Ctrl+X Tab** to
+  focus the band, **Tab** or the arrows to walk the buttons and **Enter** to
+  press one; **Esc** goes back to the prompt. They take no key from the prompt.
 - A line under each Agent call in the transcript shows the level of the agent
   it started.
 
@@ -42,10 +45,10 @@ the `/effort` and `/model` commands, which it lets run unchanged and only
 watches afterwards to drop its own level and redraw the footer; the footer
 itself, to draw the meter; the Agent calls' rows, to add the line under them;
 and the band above the prompt, which says whose transcript is in view, where
-the rows of live subagents go and where two hidden buttons take the keys,
-leaving whatever other plugins and Claude Code show there in place. It reads
-your settings and the session's list of agents and nothing else, sends nothing
-anywhere, and keeps its state in the session only.
+the rows of live subagents and their buttons go and where two hidden buttons
+take the keys, leaving whatever other plugins and Claude Code show there in
+place. It reads your settings and the session's list of agents and nothing
+else, sends nothing anywhere, and keeps its state in the session only.
 
 Mods (plugins of function hooks) are an early-access Claude Code API that
 changes between releases. This one is built and tested against Claude Code
@@ -88,9 +91,16 @@ changes between releases. This one is built and tested against Claude Code
 ## Settings
 
 `/config` lists five toggles, **Effort keys: include low** through **include
-max**, all on by default. The keys step only through the levels that are on,
-for every model. The values are stored in `~/.claude/settings.json` under
-`pluginConfigs`, under the plugin's key (`effort-cycle@anerco` when installed from the marketplace).
+max**, all on by default. The keys and the band's buttons step only through the
+levels that are on, for every model.
+
+**Effort band: row for the main thread** (off by default) adds a row for the
+main thread to the band, above the subagents' rows, with its own [-] and [+]:
+`[-] [+] ▰▰▰▱▱ high    Opus 5.5 · main thread`.
+
+The values are stored in `~/.claude/settings.json` under `pluginConfigs`,
+under the plugin's key (`effort-cycle@anerco` when installed from the
+marketplace).
 
 ## Known issues
 
@@ -109,8 +119,9 @@ for every model. The values are stored in `~/.claude/settings.json` under
 - **The tasks list does not show the levels.** The plugin API draws no part of
   it, so the levels are in the band's rows, on the Agent calls' rows and in the
   footer instead.
-- **A subagent's level changes only in its own view.** Open it from the tasks
-  list and press the keys there; the band's rows only show the levels.
+- **The keys change only the agent in view.** From the main thread, a
+  subagent's level changes with its row's [-] and [+]; Alt+E there steps the
+  main thread.
 - **Ultracode is not a step.** It is a separate on/off switch that works at
   any level (`/effort ultracode on`), and the plugin API exposes no way to
   switch it.
