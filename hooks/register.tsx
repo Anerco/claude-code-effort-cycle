@@ -153,8 +153,8 @@ export const register: Register = (on, options) => {
     const agentId = e.props.view?.agentId ?? null
     const here = { ...viewed, id: e.surface }
     // A render may not write state, so the new model and the transcript in view are recorded just after.
-    if (model !== (await $.state.get(drawnModel)).value) $.clock.after(0, () => void $.state.set(drawnModel, model))
-    if (agentId !== ((await $.state.get(here)).value ?? null)) $.clock.after(0, () => void $.state.set(here, agentId))
+    if (model !== (await $.state.get(drawnModel)).value) recordSoon($, () => $.state.set(drawnModel, model))
+    if (agentId !== ((await $.state.get(here)).value ?? null)) recordSoon($, () => $.state.set(here, agentId))
     if (e.props.isWorking !== (sweeper !== undefined)) $.clock.after(0, () => sweep($, e.props.isWorking, e.surface))
     // The band is shared: what the plugins beneath and Claude Code's surveys draw there stays, the buttons hidden beside it.
     const below = await next(e)
@@ -213,6 +213,20 @@ async function agentStep($: Engine, agentId: string, model: string, effort: stri
 // Alt+E and Alt+Shift+E: a step of the agent the surface views.
 async function step($: Engine, options: PluginOptions, by: 1 | -1, surface: string) {
   await serially(async () => stepAgent($, options, by, (await $.state.get({ ...viewed, id: surface })).value ?? null))
+}
+
+// Makes a write a render could not, once the render is over. A timer can fire while another site draws, which refuses
+// the write too, so a refused one is tried again a little later, a few times.
+const RECORD_TRIES = 10
+const RECORD_RETRY_MS = 30
+function recordSoon($: Engine, write: () => Promise<unknown>, tries = RECORD_TRIES) {
+  $.clock.after(tries === RECORD_TRIES ? 0 : RECORD_RETRY_MS, async () => {
+    try {
+      await write()
+    } catch {
+      if (tries > 1) recordSoon($, write, tries - 1)
+    }
+  })
 }
 
 // Runs steps one after another: each reads the level the last one wrote, so two presses close together make two.
