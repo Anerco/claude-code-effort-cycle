@@ -11,11 +11,11 @@ const agent = (id: string, type: string, description = 'a task'): AgentInfo => (
 
 // A session on Opus 5.5 at high with two subagents, an Explore and a general-purpose; `sent` holds each
 // request's agent and effort as it left the plugin, and `view` opens a transcript as the tasks list does.
-async function world($: Engine, on: On) {
+async function world($: Engine, on: On, settings: Record<string, unknown> = { effortLevel: 'high' }) {
   engineBand(on)
   engineModes(on)
   const clock = mock.clock(on)
-  on('settings.read', () => ({ value: { effortLevel: 'high' } }))
+  on('settings.read', () => ({ value: settings }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   const listed = [agent('a1', 'Explore', 'Find the config'), agent('a2', 'general-purpose', 'Fix the parser')]
   on('agent.list', () => ({ value: listed }))
@@ -303,4 +303,55 @@ test('two surfaces drawing the band keep their own view: the terminal in a subag
   await up()
   expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▱▱ high')
   expect(await remoteFooter()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+})
+
+// The files the plugin writes, as the test records them, and where a tasks list row's parts go for session s1.
+function files(on: On) {
+  const writes: { path: string; text: string }[] = []
+  on('fs.write', (_, e) => {
+    writes.push(e)
+    return { value: undefined }
+  })
+  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }))
+  on('session.id', () => ({ value: 's1' }))
+  // The last write's parts, colors left out.
+  const parts = () => {
+    const last = JSON.parse(writes.at(-1)?.text ?? '{}') as { order?: number; agents?: Record<string, string> }
+    return { ...last, agents: Object.fromEntries(Object.entries(last.agents ?? {}).map(([id, text]) => [id, text.replace(/\x1b\[[0-9;]*m/g, '')])) }
+  }
+  return { writes, parts }
+}
+
+test('with a subagentStatusLine command in settings, each subagent\'s level is left for its tasks list row, and follows the keys', async ($, on) => {
+  const { writes, parts } = files(on)
+  const { request, view, up } = await world($, on, { effortLevel: 'high', subagentStatusLine: { type: 'command', command: 'rows' } })
+  await request('medium', 'a1')
+  await request('high', 'a2')
+  expect(writes.at(-1)?.path).toBe('/home/u/.claude/subagent-rows/sessions/s1/effort-cycle.json')
+  expect(parts()).toEqual({ order: 10, agents: { a1: '‹▰▰▱▱▱› medium', a2: '‹▰▰▰▱▱› high' } })
+  // The blocks and the word take the level's color.
+  expect(JSON.parse(writes.at(-1)!.text).agents.a2).toBe('‹\x1b[33m▰▰▰\x1b[39m▱▱› \x1b[33mhigh\x1b[39m')
+
+  // A request at the level it already has writes nothing.
+  const before = writes.length
+  await request('medium', 'a1')
+  expect(writes.length).toBe(before)
+  await view('a1')
+  await up()
+  expect(parts().agents).toEqual({ a1: '‹▰▰▰▱▱› high', a2: '‹▰▰▰▱▱› high' })
+  // The main thread has no row there: its steps write nothing.
+  await view()
+  await up()
+  expect(writes.length).toBe(before + 1)
+})
+
+test('without a subagentStatusLine command nothing is written, and the levels it kept go out at the first write once there is one', async ($, on) => {
+  const { writes, parts } = files(on)
+  const settings: Record<string, unknown> = { effortLevel: 'high' }
+  const { request } = await world($, on, settings)
+  await request('medium', 'a1')
+  expect(writes).toEqual([])
+  settings.subagentStatusLine = { type: 'command', command: 'rows' }
+  await request('xhigh', 'a2')
+  expect(parts().agents).toEqual({ a1: '‹▰▰▱▱▱› medium', a2: '‹▰▰▰▰▱› xhigh' })
 })

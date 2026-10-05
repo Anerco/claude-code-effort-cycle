@@ -29,6 +29,8 @@ declare module 'claude-code' {
       flash: { id: number; from: number; to: number; agentId: string | null } | null
       /** The block the sweep lights at max while Claude works, by index; null between sweeps and otherwise. */
       swept: number | null
+      /** Each subagent's level as its row in the tasks list last got it, by agent id. */
+      listed: Record<string, string>
     }
   }
 }

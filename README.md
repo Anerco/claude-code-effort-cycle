@@ -16,6 +16,9 @@ keyboard, per agent, without leaving a row in the transcript:
   `Explore · Opus 5.5 ▰▰▱▱▱ medium`.
 - A line under each Agent call in the transcript shows the level of the agent
   it started.
+- With one setting (see [Levels in the tasks list](#levels-in-the-tasks-list)),
+  each subagent's row in the tasks list under the prompt shows its level too:
+  `Fix the parser · ‹▰▰▰▱▱› high · Reading the failing test`.
 
 ![Alt+E steps the effort meter up to max, a light sweeps the bar while Claude works, Alt+Shift+E steps back down](demo.gif)
 
@@ -39,9 +42,9 @@ drop its own level and redraw the footer; the footer itself, to draw the
 meter; the Agent calls' rows, to add the line under them; and the band above
 the prompt, which says whose transcript is in view and where two hidden
 buttons take the keys, leaving whatever other plugins and Claude Code show
-there in place. It reads your
-settings and the session's list of agents and nothing else, sends nothing
-anywhere, and keeps its state in the session only.
+there in place. It reads your settings and the session's list of agents and
+nothing else, sends nothing anywhere, and keeps its state in the session, save
+the levels it leaves for the tasks list's rows when you turn that on.
 
 Mods (plugins of function hooks) are an early-access Claude Code API that
 changes between releases. This one is built and tested against Claude Code
@@ -81,6 +84,42 @@ changes between releases. This one is built and tested against Claude Code
    (Settings → Profiles → Keys), in Ghostty set `macos-option-as-alt = true`.
    Or bind a ctrl chord instead.
 
+## Levels in the tasks list
+
+A plugin cannot draw in the tasks list, but Claude Code draws its subagent
+rows from a command's output when `~/.claude/settings.json` names one as
+`subagentStatusLine`. This repo has one, `subagent-rows/rows.py` (it needs
+Python 3). Copy it somewhere of its own, outside the plugin, and name it in
+settings:
+
+```sh
+mkdir -p ~/.claude/subagent-rows
+curl -fsSL https://raw.githubusercontent.com/Anerco/claude-code-effort-cycle/main/subagent-rows/rows.py -o ~/.claude/subagent-rows/rows.py
+```
+
+```json
+"subagentStatusLine": { "type": "command", "command": "python3 ~/.claude/subagent-rows/rows.py" }
+```
+
+Each row then reads the Agent call's description, the agent's level and what
+it is doing, cut to fit, its activity first:
+
+```
+◯ Fix the parser · ‹▰▰▰▱▱› high · Reading failing note test in chat.spec.ts
+```
+
+Claude Code runs the command every five seconds while there are subagents, so
+a row follows an Alt+E press within that. The row takes the place of Claude
+Code's own, which also shows the agent's time and tokens; the main thread has
+no row there, and its level stays in the footer.
+
+While the setting is there, the plugin writes each subagent's level to
+`~/.claude/subagent-rows/sessions/<session id>/effort-cycle.json` as
+`{"order": 10, "agents": {"<agent id>": "<text>"}}`. The script joins every
+file in a session's folder by `order`, so another plugin can add its own part
+of the rows the same way, and it deletes a session's folder once nothing in it
+has changed for a week.
+
 ## Settings
 
 `/config` lists five toggles, **Effort keys: include low** through **include
@@ -105,8 +144,10 @@ marketplace).
   so the plugin learns it from the agent's first request, a moment after it
   starts. An agent started before the plugin loaded shows `—` until its next
   request.
-- **The tasks list does not show the levels.** The plugin API draws no part of
-  it, so the levels are on the Agent calls' rows and in the footer instead.
+- **The tasks list shows the levels only through a command.** The plugin API
+  draws no part of it, so its rows need the `subagentStatusLine` setting
+  ([Levels in the tasks list](#levels-in-the-tasks-list)), and follow a press
+  within five seconds.
 - **The keys change only the agent in view.** To step another agent, open its
   transcript from the tasks list.
 - **Ultracode is not a step.** It is a separate on/off switch that works at
@@ -130,7 +171,10 @@ generated per Claude Code build and are not committed.
 effort-cycle collects no personal data. It reads Claude Code's own settings
 and the session's model and agents, keeps each agent's effort level in session state
 on your machine, and sends nothing to any server: no telemetry, no network
-requests. Nothing is kept after the session ends.
+requests. With the `subagentStatusLine` setting it also writes each subagent's
+level to a file under `~/.claude/subagent-rows`, which the script deletes a week
+after the session last wrote it; otherwise nothing is kept after the session
+ends.
 
 ## License
 

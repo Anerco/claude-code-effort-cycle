@@ -42,6 +42,14 @@ import type { AgentEffort } from '../types'
 // label. Changing effort the engine's way (/effort, alt+p) drops the main
 // thread's pick, and a subagent's when the engine's level for it changes too;
 // alt+p's effort is seen at the next request.
+//
+// The tasks list draws no part a mod can, but its rows take a `subagentStatusLine`
+// command's text: when settings name one, the mod leaves each subagent's level,
+// `‹▰▰▰▱▱› high`, in ~/.claude/subagent-rows/sessions/<session id>/effort-cycle.json
+// as `{ "order": 10, "agents": { "<agent id>": "<text>" } }`, for a command that
+// joins every plugin's part of a row (subagent-rows/rows.py is one). It is written
+// when a level changes, and the command runs every five seconds, so a row follows
+// a press within that.
 const LEVELS = ['low', 'medium', 'high', 'xhigh', 'max']
 
 const override = { plugin: 'effort-cycle', key: 'override' } as const
@@ -52,6 +60,7 @@ const viewed = { plugin: 'effort-cycle', key: 'viewedOn' } as const
 const drawnModel = { plugin: 'effort-cycle', key: 'drawnModel' } as const
 const flash = { plugin: 'effort-cycle', key: 'flash' } as const
 const swept = { plugin: 'effort-cycle', key: 'swept' } as const
+const listed = { plugin: 'effort-cycle', key: 'listed' } as const
 
 // The label's color per level, by theme key, so it follows the person's theme: cool to hot.
 const HEAT: Record<string, string> = { low: 'inactive', medium: 'success', high: 'warning', xhigh: 'claude', max: 'error' }
@@ -64,6 +73,10 @@ const WAIT = 'wait'
 // The sweep moves one block per step, as a terminal draws it, then rests: 5 steps of 85ms in each 1530ms.
 const SWEEP_STEP_MS = 85
 const SWEEP_STEPS = 18
+// This plugin's place among the parts of a tasks list row, and its colors there, which take ANSI codes and not theme
+// keys: gray, green, yellow, orange, red.
+const ROW_ORDER = 10
+const ROW_HEAT: Record<string, string> = { low: '90', medium: '32', high: '33', xhigh: '38;5;208', max: '31' }
 
 // Runs while Claude works; the band starts and stops it.
 let sweeper: Timer | undefined
@@ -192,6 +205,8 @@ async function agentStep($: Engine, agentId: string, model: string, effort: stri
     const isEngineChange = current.model === model && current.base !== null && current.base !== level
     return { ...current, model, base: level, override: isEngineChange ? null : current.override }
   })
+  // The engine's own forks are no agent of the list, and have no row.
+  if (now.label !== undefined) await listLevel($, agentId, agentLevel(now))
   return level === null ? null : now.override
 }
 
@@ -228,7 +243,10 @@ async function stepAgent($: Engine, options: PluginOptions, by: 1 | -1, agentId:
     if (held !== undefined && known !== null) {
       current = LEVELS.indexOf(known)
       const chosen = above(current)
-      if (chosen) await update($, ref, now => ({ ...(now ?? held), override: chosen }))
+      if (chosen) {
+        await update($, ref, now => ({ ...(now ?? held), override: chosen }))
+        await listLevel($, agentId, chosen)
+      }
       level = chosen
     }
   }
@@ -238,6 +256,28 @@ async function stepAgent($: Engine, options: PluginOptions, by: 1 | -1, agentId:
   $.clock.after(FLASH_MS, async () => {
     if ((await $.state.get(flash)).value?.id === id) await $.state.set(flash, null)
   })
+}
+
+// Leaves a subagent's level for its row in the tasks list (see the header). Every level is kept, so the first write
+// once settings name a subagentStatusLine command has them all; a level that did not change writes nothing.
+async function listLevel($: Engine, agentId: string, level: string | null) {
+  if (level === null) return
+  const before = (await $.state.get(listed)).value?.[agentId]
+  if (before === level) return
+  const levels = await update($, listed, all => ({ ...all, [agentId]: level }))
+  if ((await $.settings.read()).subagentStatusLine === undefined) return
+  const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
+  if (home === undefined) return
+  const parts = Object.fromEntries(Object.entries(levels).map(([id, held]) => [id, rowPart(held)]))
+  const file = `${home}/.claude/subagent-rows/sessions/${await $.session.id()}/effort-cycle.json`
+  await $.fs.write(file, JSON.stringify({ order: ROW_ORDER, agents: parts }))
+}
+
+// A level as a tasks list row shows it: `‹▰▰▰▱▱› high`, the filled blocks and the word in its color.
+function rowPart(level: string): string {
+  const filled = LEVELS.indexOf(level) + 1
+  const color = (text: string) => `\x1b[${ROW_HEAT[level] ?? '39'}m${text}\x1b[39m`
+  return `‹${color('▰'.repeat(filled))}${'▱'.repeat(LEVELS.length - filled)}› ${color(level)}`
 }
 
 // While Claude works, steps the sweep's head along the bar at max; otherwise stops it and clears the head.
