@@ -124,7 +124,7 @@ export const register: Register = (on, options) => {
 async function step($: Engine, options: PluginOptions, by: 1 | -1) {
   const model = await $.session.model()
   const current = LEVELS.indexOf(await effortFor($, model))
-  const allowed = LEVELS.filter(level => options[`include${level[0].toUpperCase()}${level.slice(1)}`] !== false)
+  const allowed = LEVELS.filter(level => options[`include${level.charAt(0).toUpperCase()}${level.slice(1)}`] !== false)
   const level = by > 0 ? allowed.find(l => LEVELS.indexOf(l) > current) : [...allowed].reverse().find(l => LEVELS.indexOf(l) < current)
   if (level) await $.state.set(override, { model, level })
   // The blocks the step crossed light for a moment; only the latest press's timer clears them.
@@ -159,8 +159,14 @@ async function effortFor($: Engine, model: string): Promise<string> {
   if (chosen?.model === model) return chosen.level
   const held = (await $.state.get(base)).value
   if (held?.model === model) return held.level
+  // Settings are the person's own JSON, typed unknown: a level is a string, anything else none.
   const settings = await $.settings.read()
-  return settings.modelSettings?.[model]?.effortLevel ?? settings.effortLevel ?? 'high'
+  const perModel = settings.modelSettings as { readonly [model: string]: { readonly effortLevel?: unknown } | undefined } | undefined
+  return levelOf(perModel?.[model]?.effortLevel) ?? levelOf(settings.effortLevel) ?? 'high'
+}
+
+function levelOf(value: unknown): string | undefined {
+  return typeof value === 'string' ? value : undefined
 }
 
 // claude-opus-5-5 → Opus 5.5, claude-haiku-4-5-20251001 → Haiku 4.5, …[1m] → … 1M.
@@ -168,5 +174,5 @@ function displayName(model: string): string {
   const long = model.endsWith('[1m]')
   const [family, ...version] = model.replace('[1m]', '').replace(/^claude-/, '').split('-').filter(p => !/^\d{8}$/.test(p))
   if (!family) return model
-  return `${family[0].toUpperCase()}${family.slice(1)} ${version.join('.')}`.trim() + (long ? ' 1M' : '')
+  return `${family.charAt(0).toUpperCase()}${family.slice(1)} ${version.join('.')}`.trim() + (long ? ' 1M' : '')
 }
