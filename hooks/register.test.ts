@@ -1,6 +1,11 @@
 import { test, expect, mock } from 'claude-code/testing'
+import type { On, RenderElement } from 'claude-code'
+
+// Claude Code's own band, beneath every plugin: empty here, as with no survey up.
+const engineBand = (on: On) => on('ui.render', { component: 'AbovePrompt' }, (): RenderElement => ({ type: 'Box', children: [] }))
 
 test('Alt+E steps the level up and Alt+Shift+E down, stopping at the ends, the footer shows model and level, main-loop requests carry it, the engine taking over drops it', async ($, on) => {
+  engineBand(on)
   on('settings.read', () => ({ value: { modelSettings: { 'claude-opus-5-5': { effortLevel: 'high' } } } }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   const sent: unknown[] = []
@@ -45,6 +50,7 @@ test('Alt+E steps the level up and Alt+Shift+E down, stopping at the ends, the f
 })
 
 test('the keys step only through the levels the include toggles allow', { options: { includeLow: false, includeMax: false } }, async ($, on) => {
+  engineBand(on)
   on('settings.read', () => ({ value: { effortLevel: 'medium' } }))
   on('session.model', () => ({ value: 'claude-sonnet-5' }))
   const band = await $.ui.mount({
@@ -68,6 +74,7 @@ test('the keys step only through the levels the include toggles allow', { option
 })
 
 test('a press lights the blocks it filled or emptied for a moment, the engine\'s own modes stay beside the label', async ($, on) => {
+  engineBand(on)
   const clock = mock.clock(on)
   on('settings.read', () => ({ value: { effortLevel: 'high' } }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
@@ -96,6 +103,7 @@ test('a press lights the blocks it filled or emptied for a moment, the engine\'s
 })
 
 test('at max the model name turns red, and a press past either end lights the word and leaves the meter', async ($, on) => {
+  engineBand(on)
   const clock = mock.clock(on)
   on('settings.read', () => ({ value: { effortLevel: 'xhigh' } }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
@@ -122,6 +130,7 @@ test('at max the model name turns red, and a press past either end lights the wo
 })
 
 test('at max a light sweeps the bar while Claude works, and stops when it is done', async ($, on) => {
+  engineBand(on)
   const clock = mock.clock(on)
   on('settings.read', () => ({ value: { effortLevel: 'max' } }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
@@ -145,4 +154,31 @@ test('at max a light sweeps the bar while Claude works, and stops when it is don
   expect(await lit()).toBe(-1)
   await clock.advance(85 * 18)
   expect(await lit()).toBe(-1)
+})
+
+test('the band keeps what the plugins beneath draw there, and Alt+E and Alt+Shift+E still step', {
+  plugins: [{
+    name: 'other-band',
+    register(on) {
+      on('ui.render', { component: 'AbovePrompt' }, () => ({ type: 'Box', props: { key: 'other' }, children: [{ type: 'Text', children: ['theirs'] }] }))
+    },
+  }],
+}, async ($, on) => {
+  on('settings.read', () => ({ value: { effortLevel: 'high' } }))
+  on('session.model', () => ({ value: 'claude-opus-5-5' }))
+  const band = await $.ui.mount({
+    plugin: 'effort-cycle', surface: 'terminal', component: 'AbovePrompt',
+    props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120 } as any,
+  })
+  const label = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  const footer = async () => (await label.find({ key: 'effort' }))?.text.trim()
+  const theirs = async () => (await band.find({ key: 'other' }))?.text
+
+  expect(await theirs()).toBe('theirs')
+  await band.press({ key: 'effort-up' })
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▱ xhigh')
+  await band.press({ key: 'effort-down' })
+  await band.press({ key: 'effort-down' })
+  expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
+  expect(await theirs()).toBe('theirs')
 })

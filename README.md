@@ -19,8 +19,10 @@ picker) takes over again from the next request.
 
 What it hooks: each model request on the main thread, to set its effort
 level; the `/effort` and `/model` commands, which it lets run unchanged and
-only watches afterwards to drop its own level and redraw the footer; and the
-footer itself, to draw the meter. It reads your settings and nothing else,
+only watches afterwards to drop its own level and redraw the footer; the
+footer itself, to draw the meter; and the band above the prompt, where two
+hidden buttons take the keys, leaving whatever other plugins and Claude Code
+show there in place. It reads your settings and nothing else,
 sends nothing anywhere, and keeps its state in the session only.
 
 Mods (plugins of function hooks) are an early-access Claude Code API that

@@ -11,7 +11,7 @@ import type { EngineInterface as Engine, PluginOptions, Register, Timer } from '
 // A key reaches a mod without a prompt only through a Button naming an engine
 // keybinding action, so keybindings.json binds meta+e to strip:jump9 and
 // meta+shift+e to strip:jump8 (both idle at the prompt) and two hidden Buttons
-// above the prompt take them. No key with Shift as its only modifier can
+// above the prompt take them, beside whatever other plugins draw there. No key with Shift as its only modifier can
 // (Shift+Tab, Shift+Up): the engine hands a Button only chords and Ctrl or Alt
 // keys, even with the mode switch unbound. A slash command leaves a transcript
 // row. Claude Code's /effort prints rows too, so the mod never runs it: it sends
@@ -100,16 +100,21 @@ export const register: Register = (on, options) => {
     )
   })
 
-  on('ui.render', { component: 'AbovePrompt' }, async ($, e) => {
+  on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     const model = await $.session.model()
     // A render may not write state, so the new model is recorded just after.
     if (model !== (await $.state.get(drawnModel)).value) $.clock.after(0, () => void $.state.set(drawnModel, model))
     if (e.props.isWorking !== (sweeper !== undefined)) $.clock.after(0, () => sweep($, e.props.isWorking))
+    // The band is shared: what the plugins beneath and Claude Code's surveys draw there stays, the buttons hidden beside it.
+    const below = await next(e)
     const { Box, Button } = $.ui.resolve(e)
     return (
-      <Box display="none">
-        <Button key="effort-up" label="effort up" action="strip:jump9" onPress={() => step($, options, 1)} />
-        <Button key="effort-down" label="effort down" action="strip:jump8" onPress={() => step($, options, -1)} />
+      <Box flexDirection="column">
+        {below}
+        <Box display="none">
+          <Button key="effort-up" label="effort up" action="strip:jump9" onPress={() => step($, options, 1)} />
+          <Button key="effort-down" label="effort down" action="strip:jump8" onPress={() => step($, options, -1)} />
+        </Box>
       </Box>
     )
   })
