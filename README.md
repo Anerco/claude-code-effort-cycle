@@ -14,13 +14,6 @@ keyboard, per agent, without leaving a row in the transcript:
   while Claude works a light sweeps across the bar. In a subagent's
   transcript the meter is that agent's, led by its type:
   `Explore · Opus 5.5 ▰▰▱▱▱ medium`.
-- The band above the prompt has a row per live subagent: its meter between a
-  **‹** and a **›**, its level, then who it is, its model and its task, in
-  columns that line up. Click **‹** to step that agent down and **›** to step
-  it up: every click is one step, quick clicks included, and nothing gets
-  selected or copied. Each chevron takes a click on itself or the cell either
-  side of it, and none takes a key from the prompt. A row goes when its agent
-  ends.
 - A line under each Agent call in the transcript shows the level of the agent
   it started.
 
@@ -34,45 +27,19 @@ it and says `wait`. Changing effort Claude Code's way (`/effort`, the Alt+P
 picker) takes over again from the next request, for the main thread and for
 any subagent whose level Claude Code changes with it.
 
-With **Effort band: levels live in the band** on (see Settings), the band
-leads with a row for the main thread, shows every row in any view, marks the
-agent you are viewing with `▸`, and the footer draws no meter. On the main
-thread:
-
-```
-▸‹ ▰▰▰▱▱ ›  high    main thread       Opus 5.5
- ‹ ▰▰▱▱▱ ›  medium  Explore           Opus 5.5  Find the config
- ‹ ▰▰▰▱▱ ›  high    general-purpose   Opus 5.5  Fix the parser
- ‹ ▰▰▰▰▱ ›  xhigh   Plan              Opus 5.5  Design the export page
-```
-
-And inside the Explore agent's transcript:
-
-```
- ‹ ▰▰▰▱▱ ›  high    main thread       Opus 5.5
-▸‹ ▰▰▱▱▱ ›  medium  Explore           Opus 5.5  Find the config
- ‹ ▰▰▰▱▱ ›  high    general-purpose   Opus 5.5  Fix the parser
- ‹ ▰▰▰▰▱ ›  xhigh   Plan              Opus 5.5  Design the export page
-```
-
-With it off, the band shows the subagents' rows while the main thread is in
-view, unmarked, and the footer shows the level of the agent in view.
-
 With the session also open on another surface over Remote Control (Claude
-Code Desktop), each surface follows its own view: the keys step, and the `▸`
-marks, the agent that surface is viewing.
+Code Desktop), each surface follows its own view: the keys step the agent that
+surface is viewing.
 
-What it hooks: the session's start, to ask the session's list of agents every
-two seconds which subagents are live; each model request, the main thread's
-and every subagent's, to read its effort level and set the one picked for that
-agent; each subagent's start, to tie the Agent call to the agent it started;
-the `/effort` and `/model` commands, which it lets run unchanged and only
-watches afterwards to drop its own level and redraw the footer; the footer
-itself, to draw the meter; the Agent calls' rows, to add the line under them;
-the chevrons' messages, to step the agent of the row clicked; and the band
-above the prompt, which says whose transcript is in view, where the agents'
-rows and their chevrons go and where two hidden buttons take the keys, leaving
-whatever other plugins and Claude Code show there in place. It reads your
+What it hooks: each model request, the main thread's and every subagent's, to
+read its effort level and set the one picked for that agent; each subagent's
+start, to tie the Agent call to the agent it started; the `/effort` and
+`/model` commands, which it lets run unchanged and only watches afterwards to
+drop its own level and redraw the footer; the footer itself, to draw the
+meter; the Agent calls' rows, to add the line under them; and the band above
+the prompt, which says whose transcript is in view and where two hidden
+buttons take the keys, leaving whatever other plugins and Claude Code show
+there in place. It reads your
 settings and the session's list of agents and nothing else, sends nothing
 anywhere, and keeps its state in the session only.
 
@@ -117,13 +84,8 @@ changes between releases. This one is built and tested against Claude Code
 ## Settings
 
 `/config` lists five toggles, **Effort keys: include low** through **include
-max**, all on by default. The keys and the band's chevrons step only through
-the levels that are on, for every model.
-
-**Effort band: levels live in the band** (off by default; its key is
-`mainThreadRow`) puts every level in the band, as shown above: a row for the
-main thread first, every row in any view, the one in view marked `▸`, and no
-meter in the footer.
+max**, all on by default. The keys step only through the levels that are on,
+for every model.
 
 The values are stored in `~/.claude/settings.json` under `pluginConfigs`,
 under the plugin's key (`effort-cycle@anerco` when installed from the
@@ -144,16 +106,9 @@ marketplace).
   starts. An agent started before the plugin loaded shows `—` until its next
   request.
 - **The tasks list does not show the levels.** The plugin API draws no part of
-  it, so the levels are in the band's rows, on the Agent calls' rows and in the
-  footer instead.
-- **The keys change only the agent in view.** Any other agent's level changes
-  with its row's ‹ and ›.
-- **The ‹ and › are for the mouse.** They are drawn as Claude Code Clients,
-  which take every click without the double-click selection a plugin's button
-  gets, but the band's Tab walk (Ctrl+X Tab) does not reach them. From the
-  keyboard, Alt+E and Alt+Shift+E step the agent in view.
-- **With levels in the band and the band collapsed** (Ctrl+X Ctrl+A), or a
-  survey holding it, no level shows until the band opens again.
+  it, so the levels are on the Agent calls' rows and in the footer instead.
+- **The keys change only the agent in view.** To step another agent, open its
+  transcript from the tasks list.
 - **Ultracode is not a step.** It is a separate on/off switch that works at
   any level (`/effort ultracode on`), and the plugin API exposes no way to
   switch it.

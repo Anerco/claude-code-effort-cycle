@@ -10,16 +10,6 @@ export type AgentEffort = {
   label?: string
 }
 
-/** A live subagent the band has a row for, as `$.agent.list()` gave it. */
-export type LiveAgent = {
-  /** Its agent id. */
-  id: string
-  /** Its agent type, a teammate spawned as none by its name. */
-  label: string
-  /** The Agent call's description of its task. */
-  description: string
-}
-
 declare module 'claude-code' {
   interface PluginState {
     'effort-cycle': {
@@ -33,10 +23,6 @@ declare module 'claude-code' {
       spawns: StateFamily<string>
       /** The agent whose transcript is in view, by surface (`terminal`, `desktop`), as that surface's band last saw it; null while the main conversation is. */
       viewedOn: StateFamily<string | null>
-      /** The subagents that are live (pending, running, waiting or idle), as the last poll of `$.agent.list()` found them. */
-      live: LiveAgent[]
-      /** The running count of presses each band chevron last posted, by the chevron's id, so a later post steps by how far it moved. */
-      pressesSeen: StateFamily<number>
       /** The model the footer label last drew; a change (/model, alt+p) draws it again. */
       drawnModel: string
       /** The step Alt+E or Alt+Shift+E just made, as level indexes, whose blocks the meter lights for a moment (`from` equal to `to` is a press past the end, which lights the word); `id` counts the presses so only the latest clears it; `agentId` is the agent it stepped, null for the main thread. */
