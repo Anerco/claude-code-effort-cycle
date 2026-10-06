@@ -1,336 +1,142 @@
-# effort-cycle: per-agent effort levels for Claude Code
+# effort-cycle
 
-Turn Claude Code's reasoning effort up or down from the keyboard, for the main
-thread or any one subagent, and see each agent's level at a glance. There is
-nothing to bind, and nothing is left in the transcript:
-
-- **Ctrl+↑** steps the effort up: low → medium → high → xhigh → max, stopping
-  at max. **Ctrl+↓** steps it down, stopping at low. They work as soon as the
-  plugin is installed (on macOS, see [Install](#install)).
-- The keys change the agent in view: the main thread, or the subagent whose
-  transcript you opened from the tasks list. Every other agent keeps its level.
-- The footer shows that agent's model and level as a meter colored cool to hot
-  (gray, green, yellow, orange, red, by theme color): `Opus 5.5 ▰▰▰▱▱ high`.
-  The blocks a press fills or empties light for a moment, and a press past
-  either end lights the level's word. At max the model name turns red too, and
-  while Claude works a light sweeps across the bar. In a subagent's transcript
-  the meter is that agent's, led by its type: `Explore · Opus 5.5 ▰▰▱▱▱ medium`.
-- Point at the footer's label and a **‹** and a **›** appear around the meter:
-  click **‹** to step down and **›** to step up, exactly as Ctrl+↓ and
-  Ctrl+↑ do, for the agent the footer shows. Their cells stay blank while the
-  pointer is elsewhere, and the level's word keeps a fixed width, so nothing
-  moves as they appear or as the level changes:
-
-  ```
-  not hovered:  Opus 5.5   ▰▰▰▱▱ high
-  hovered:      Opus 5.5 ‹ ▰▰▰▱▱ high   ›
-  ```
-
-  Every click is one step, quick clicks included, and nothing gets selected or
-  copied. Each caret takes a click on itself or the cell either side of it.
-- A line under each Agent call in the transcript shows the level of the agent
-  it started.
-- Each subagent's row in the tasks list under the prompt shows its model and
-  level too, as the footer writes them:
-  `Fix the parser · Opus 5.5 ▰▰▰▱▱ high · Reading the failing test`
-  (see [Levels in the tasks list](#levels-in-the-tasks-list); it needs
-  `python3`). Claude Code redraws those rows every five seconds; an optional
-  toggle makes a row follow a press in about 0.4 s instead.
+Per-agent effort levels for Claude Code: step them from the keyboard, see them
+at a glance.
 
 ![Ctrl+↑ steps the footer's effort meter up to max, a light sweeps the bar while Claude works and a subagent's row in the tasks list shows its own level, then Ctrl+↓ steps the meter back down](demo.gif)
 
-Each agent's level is its own and applies to that agent's next model requests.
-The main thread starts at the level Claude Code gives its model, which the
-footer shows from the moment the session opens, before any request:
-`CLAUDE_CODE_EFFORT_LEVEL` if it is set, else a level your settings save for
-the model (as `/effort` and the Alt+P picker save one), else the model's own
-default, such as medium on Opus 5.5. A subagent starts at the level Claude
-Code gives it (its definition's `effort`, else the main thread's), which the
-plugin reads off the subagent's first model request; until then its meter is
-empty (`—`), and a press or a click leaves it and says `wait`. Its model shows
-from the moment it starts: `Explore · Opus 5.5 ▱▱▱▱▱ —`. Changing effort
-Claude Code's way (`/effort`, the Alt+P picker) takes over again from the next
-request, for the main thread and for any subagent whose level Claude Code
-changes with it.
-
-With the session also open on another surface over Remote Control (Claude
-Code Desktop), each surface follows its own view: the keys and that surface's
-‹ › step the agent that surface is viewing. The ‹ › are drawn wherever the
-footer is: the terminal and the desktop.
-
-What it hooks: the session's start, to tell the tasks list's command where
-the plugin's script is; each model request, the main thread's and every
-subagent's, to read its effort level and set the one picked for that agent;
-each subagent's
-start, to tie the Agent call to the agent it started and note the model it
-runs on; the `/effort` and `/model` commands, which it lets run unchanged and
-only watches afterwards to drop its own level and redraw the footer; the
-footer itself, to draw the meter and its ‹ ›; the ‹ ›'s clicks, to step the
-agent the footer shows, and a ‹ › that fails to load, to draw that surface's
-footer without them; the Agent calls' rows, to add the line under them; and
-the band above the prompt, which says whose transcript is in view and where
-hidden buttons take the keys, leaving whatever other plugins and Claude Code
-show there in place. It reads your settings, `CLAUDE_CODE_EFFORT_LEVEL` and
-the session's list of agents and nothing else, sends nothing anywhere, and
-keeps its state in the session, save the levels it leaves for the tasks
-list's rows. It sets one
-environment variable, `EFFORT_CYCLE_ROWS`, to the path of its own
-`subagent-rows/rows.py`, which the commands Claude Code starts inherit. With
-**Tasks list rows: update at once** on, it also runs a short
-`python3` process on each change, which resizes the terminal and does nothing
-else.
-
-Mods (plugins of function hooks) are an early-access Claude Code API that
-changes between releases. This one is built and tested against Claude Code
-2.1.291.
+- **Ctrl+↑ and Ctrl+↓** step the level: low, medium, high, xhigh, max.
+- **Per agent.** The keys change the agent in view. Every other agent keeps its level.
+- **A meter in the footer**, colored cool to hot: `Opus 5.5 ▰▰▰▱▱ high`.
+- **Clickable ‹ ›** appear around the meter when you point at it.
+- **The tasks list** shows each subagent's model and level in its row.
+- **`/config` toggles** choose which levels the keys step through.
 
 ## Install
-
-Install it from the [anerco marketplace](https://github.com/Anerco/plugins), in Claude Code:
 
 ```
 /plugin marketplace add Anerco/plugins
 /plugin install effort-cycle@anerco
 ```
 
-That is all: Ctrl+↑ and Ctrl+↓ step the level from then on, and the tasks
-list's rows show it, as the plugin brings their setting with it
-([Levels in the tasks list](#levels-in-the-tasks-list)).
+There is nothing to bind: the keys work right away. The tasks list's rows need
+`python3` on your `PATH` (on macOS, from `xcode-select --install` or Homebrew).
 
-Or, to work on it, clone the repo and load the folder with
-`claude --plugin-dir <folder>`, or in every session through
-`CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`.
+**macOS:** Ctrl+↑ and Ctrl+↓ are Mission Control's shortcuts by default. Use
+Option+↑ and Option+↓ instead, with your terminal set to send Option as Meta
+(Terminal.app: **Use Option as Meta key**; iTerm2: **Left Option key** set to
+**Esc+**; Ghostty: `macos-option-as-alt = true`).
 
-A mod cannot own a key, and a plugin brings no keybindings. A mod can only
-borrow one of Claude Code's own keybinding actions, so the plugin listens for
-the diff panel's file-list actions, `app:diffFileListUp` (up) and
-`app:diffFileListDown` (down), whose default keys are Ctrl+↑ and Ctrl+↓, and
-which do nothing at the prompt. A draft in the prompt stays as it is. While
-the diff panel's file list scrolls, the keys are its own again
-([Known issues](#known-issues)).
+**Updates:** in `/plugin`, choose Marketplaces → anerco → Enable auto-update.
+Or run `claude plugin update effort-cycle@anerco` and restart Claude Code.
 
-On macOS, Ctrl+↑ and Ctrl+↓ belong to Mission Control and Application windows
-by default. Turn those off in System Settings → Keyboard → Keyboard Shortcuts
-→ Mission Control, or step with Option+↑ and Option+↓, which Claude Code binds
-to the same actions, once the terminal sends Option as Meta: in Terminal.app
-turn on **Use Option as Meta key** (Settings → Profiles → Keyboard), in iTerm2
-set **Left Option key** to **Esc+** (Settings → Profiles → Keys), in Ghostty
-set `macos-option-as-alt = true`.
+Built and tested against Claude Code 2.1.291. effort-cycle is a mod (a plugin
+of function hooks), an early-access API that changes between releases.
 
-## Levels in the tasks list
+## Usage
 
-A plugin cannot draw in the tasks list, but Claude Code draws its subagent
-rows from a command's output when settings name one as `subagentStatusLine`,
-and a plugin may bring that setting with it. This one does, in its
-`settings.json`, which Claude Code applies while the plugin is enabled, so
-installing the plugin is all it takes. The command runs the plugin's own
-`subagent-rows/rows.py`, which needs `python3` on your `PATH`: on macOS the
-one that comes with the Xcode command line tools (`xcode-select --install`)
-or Homebrew's will do, as will any Python 3 on Linux. It uses nothing outside
-Python's standard library.
+| Control | What it does |
+| --- | --- |
+| Ctrl+↑ | One level up for the agent in view, stopping at max |
+| Ctrl+↓ | One level down, stopping at low |
+| **‹** and **›** in the footer | Point at the footer's label, then click ‹ to step down or › to step up |
+| `/effort`, Alt+P | Claude Code's own controls still work, and take over from the plugin's pick |
 
-Each row then reads the Agent call's description, the agent's model and level
-as the footer writes them, in the footer's colors (the model's name turns red
-at max), what it is doing, and, dim, how long it has run and its tokens, as
-Claude Code's own row shows them:
+The agent in view is the main thread, or the subagent whose transcript you
+opened from the tasks list. A pick lasts for the session. The footer shows the
+agent's model and level, led by its type in a subagent's transcript:
 
 ```
-◯ Fix the parser · Opus 5.5 ▰▰▰▱▱ high · Reading failing note test · 53m 11s · ↓ 499.8k tokens
+Opus 5.5   ▰▰▰▱▱ high                 main thread
+Opus 5.5 ‹ ▰▰▰▱▱ high   ›             pointer on the label
+Explore · Opus 5.5   ▰▰▱▱▱ medium     a subagent's transcript
+```
+
+The colors follow your theme, from gray at low to red at max. At max the
+model's name turns red too, and a light sweeps the bar while Claude works.
+Each Agent call in the transcript gets a line with its agent's level.
+
+### Levels in the tasks list
+
+Each subagent's row in the tasks list under the prompt shows its model and
+level, in the footer's colors:
+
+```
+◯ Fix the parser · Opus 5.5 ▰▰▰▱▱ high · Reading the failing test · 53m 11s · ↓ 499.8k tokens
 ◯ Find the config · Sonnet 5.5 ▰▰▱▱▱ medium · Searching settings · 2m 4s · ↓ 31.2k tokens
-◯ Audit the tests · Opus 5.5 ▰▰▰▰▰ max · Running the suite · 41s · ↓ 12.9k tokens
 ```
 
-The list takes no clicks, so its rows have no ‹ ›: step an agent from its
-transcript's footer. A row too wide for the list drops its tokens, then its
-time, then is cut in its activity. The time shows only while the agent runs:
-the command is told when an agent started, not when it ended. Claude Code runs
-the command every five seconds while there are subagents, so a row follows a
-press of the keys or a click within that, or in about 0.4 s with
-[Rows that follow at once](#rows-that-follow-at-once) on. The main thread has
-no row there, and its level stays in the footer.
+The rows take no clicks; open a subagent's transcript to step it. Claude Code
+redraws them every five seconds, or in about 0.4 s with **Tasks list rows:
+update at once** on ([Settings](#settings)).
 
-Claude Code puts no `${CLAUDE_PLUGIN_ROOT}` into a plugin's settings and runs
-the command in the session's folder, and the plugin's folder changes with
-each version, so the setting cannot name the script's path. The plugin's
-setting is
+### Where a level starts
 
-```json
-"subagentStatusLine": { "type": "command", "command": "[ -z \"$EFFORT_CYCLE_ROWS\" ] || exec python3 -I -S \"$EFFORT_CYCLE_ROWS\"" }
-```
+The main thread starts at the level Claude Code gives its model:
+`CLAUDE_CODE_EFFORT_LEVEL` if it is set, else a level your settings save for
+the model (as `/effort` and Alt+P save one), else the model's default: medium
+on Opus 5.5 and Sonnet 5.5, xhigh on Opus 4.7, high on the rest.
 
-and the plugin sets `EFFORT_CYCLE_ROWS` to its own `rows.py` as the session
-starts. Until it has, the command prints nothing and the rows stay Claude
-Code's own.
-
-A `subagentStatusLine` in your own settings wins over the plugin's: plugin
-settings are the lowest layer, under the user, project and local files. The
-plugin still writes the levels while yours is in effect, so a command of your
-own can show them too, or run a copy of `rows.py` kept anywhere:
-
-```json
-"subagentStatusLine": { "type": "command", "command": "python3 ~/.claude/subagent-rows/rows.py" }
-```
-
-That is the setting this README had you add before 0.2.1. If it is in your
-`~/.claude/settings.json`, remove it, and the file
-`~/.claude/subagent-rows/rows.py` with it, and the plugin's own script takes
-over, updated with the plugin. Leave the `sessions` folder beside it: the
-plugin writes there.
-
-While a `subagentStatusLine` is in effect, the plugin's or yours, the plugin
-writes each subagent's model and level
-to `~/.claude/subagent-rows/sessions/<session id>/effort-cycle.json` as
-`{"order": 10, "agents": {"<agent id>": "<text>"}}`. The script joins every
-file in a session's folder by `order`, so another plugin can add its own part
-of the rows the same way, and it deletes a session's folder once nothing in it
-has changed for a week.
-
-The file is written when an agent starts, with its model beside the footer's
-empty meter (`Opus 5.5 ▱▱▱▱▱ —`), and whenever an agent's level changes.
-Claude Code reruns the command 300 ms after an agent starts, so a new row
-shows its model from its first draw, and its level once the agent's first
-model request has said it, a moment later.
-
-### Rows that follow at once
-
-Claude Code reruns the `subagentStatusLine` command on a fixed five-second
-timer that no setting changes, so a row lags a press by anything up to five
-seconds. It also reruns it 300 ms after the terminal's width changes. The
-`/config` toggle **Tasks list rows: update at once**, off by default, uses
-that: each time the plugin writes a changed level, it runs a short `python3`
-process that narrows the terminal by one column and restores it 5 ms later,
-and Claude Code redraws the row about 0.36 s after the press.
-
-Measured with Claude Code 2.1.291 in tmux on Linux (WSL2), from a key press
-to the row showing the new level:
-
-| | view | fastest | median | slowest | presses |
-| --- | --- | --- | --- | --- | --- |
-| off | fullscreen | 1.4 s | 3.6 s | 4.5 s | 12 |
-| on | fullscreen | 0.35 s | 0.36 s | 0.37 s | 20 |
-| off | default | 0.1 s | 1.6 s | 4.2 s | 10 |
-| on | default | 0.35 s | 0.36 s | 0.37 s | 12 |
-
-Off, a row waits for the next tick of the five-second timer, so any wait
-from none to five seconds is as likely as any other; on, every press in
-these runs showed within 0.37 s.
-
-What it costs, and what to know:
-
-- **Two repaints per nudge.** Claude Code redraws the whole screen at the
-  narrower width and again at the real one.
-- **A one-column flicker.** Claude Code usually paints one frame at the
-  narrower width: for about 13 ms everything aligned to the right edge (the
-  footer's model and level, a line that fills the width) sits one column to
-  the left, then moves back. It showed in 15 of 15 presses in the fullscreen
-  view and 9 of 10 in the default one. The 5 ms between the two steps is what
-  makes Claude Code see the narrower width at all: with no pause it missed it
-  3 times in 8.
-- **A burst of presses makes one nudge.** A change within 250 ms of the last
-  nudge rides on it: Claude Code's rerun reads the file after it anyway.
-- **It relies on Claude Code's internals, not on the plugin API.** The
-  five-second timer and the rerun after a width change are how 2.1.291
-  schedules the command, and a later release may change either. If it stops
-  working, rows follow at Claude Code's own pace again; nothing else breaks.
-- **It needs `python3` and a terminal.** In Claude Code Desktop, on a remote
-  surface or in a headless run there is no terminal to nudge, and it does
-  nothing; without `python3` it stops trying for the session. A resize you
-  make within those 5 ms wins over its restore, and the terminal is never
-  left narrowed, even if the plugin reloads mid-nudge.
-- **Tested only in tmux, on Linux.** In both the fullscreen view and the
-  default one (`/tui default`), where 22 nudges left nothing reprinted in the
-  scrollback. Not yet tried in Windows Terminal, iTerm2, Ghostty or other
-  terminals directly, or with a long transcript.
+A subagent starts at its definition's `effort`, else the main thread's level.
+Its meter is empty (`—`) until its first model request says which, a moment
+after it starts; a press before then shows `wait`.
 
 ## Settings
 
-`/config` lists five toggles, **Effort keys: include low** through **include
-max**, all on by default. The keys and the footer's ‹ › step only through the
-levels that are on, for every model.
+The plugin adds these toggles to `/config`:
 
-A sixth, **Tasks list rows: update at once**, off by default, makes the tasks
-list's rows follow a change in about 0.4 s instead of up to five seconds, at
-the costs described under [Rows that follow at once](#rows-that-follow-at-once).
+| Toggle | Default | What it does |
+| --- | --- | --- |
+| Effort keys: include low | on | The keys and ‹ › step through low |
+| Effort keys: include medium | on | … through medium |
+| Effort keys: include high | on | … through high |
+| Effort keys: include xhigh | on | … through xhigh |
+| Effort keys: include max | on | … through max |
+| Tasks list rows: update at once | off | Rows follow a change in about 0.4 s, not up to 5 s |
 
-The values are stored in `~/.claude/settings.json` under `pluginConfigs`,
-under the plugin's key (`effort-cycle@anerco` when installed from the
-marketplace).
+A level that is off is skipped for every model. **Update at once** narrows the
+terminal by one column and back on each change, so the right edge flickers
+briefly; it needs `python3` ([details](docs/how-it-works.md#rows-that-follow-at-once)).
+The values are saved in `~/.claude/settings.json` under `pluginConfigs`.
 
 ## Known issues
 
 - **The spinner can show a different level from the footer**
-  ([#1](https://github.com/Anerco/claude-code-effort-cycle/issues/1)). The footer is the
-  level the requests go out with; the spinner reads Claude Code's own state,
-  which a mod cannot change.
-- **Before the first request, the footer works the main thread's level out.**
-  Claude Code tells a plugin a model's effort only on a request, so until the
-  first one the plugin resolves it as Claude Code 2.1.291 does, from
-  `CLAUDE_CODE_EFFORT_LEVEL`, your settings and the model's built-in default.
-  An organization's default, the model list Anthropic's API serves and Claude
-  Code's server-side flags can give a model another default that a plugin
-  cannot see; if one does, the footer shows Claude Code's level from the first
-  request on, and a pick of the keys made before it stands.
-- **The level is not kept after a restart.** A pick of the keys lasts for the
-  session. A mod cannot write settings, so it cannot save the level the way
-  the Alt+P picker does.
-- **A subagent's level shows once it has made a model request.** Neither the
-  session's list of agents nor a subagent's start says what effort it runs at,
-  so the plugin learns it from the agent's first request, a moment after it
-  starts; its model it learns from the start. An agent started before the
-  plugin loaded shows `—`, and no model, until its next request.
-- **The tasks list shows the levels only through a command.** The plugin API
-  draws no part of it, so its rows come from the `subagentStatusLine` command
-  the plugin brings ([Levels in the tasks list](#levels-in-the-tasks-list)),
-  which needs `python3`, and follow a press within five seconds, or about
-  0.4 s with [Rows that follow at once](#rows-that-follow-at-once) on. A
-  `subagentStatusLine` of your own replaces the plugin's. The command is a
-  POSIX shell line, so on Windows it runs only where Claude Code runs such
-  commands through Git Bash.
-- **The keys and the ‹ › change only the agent in view.** To step another
-  agent, open its transcript from the tasks list.
-- **The ‹ › need the pointer.** They show while the pointer is over the
-  footer's label, so they work where Claude Code gets mouse events from the
-  terminal, as in its fullscreen view; inside tmux that takes
-  `set -g mouse on`. Elsewhere their cells stay blank, and the keys still step.
-  They take no key: from the keyboard, Ctrl+↑ and Ctrl+↓.
-- **Ctrl+↑ and Ctrl+↓ are the diff panel's keys.** The plugin borrows Claude
-  Code's actions for scrolling the diff panel's file list,
-  `app:diffFileListUp` and `app:diffFileListDown` ([Install](#install)). While
-  the panel is open (`/diff` in the fullscreen view) and lists more changed
-  files than it shows at once (eight), the keys scroll that list and step
-  nothing; close the panel to step again. With fewer files, or with the panel
-  closed, they step as usual. If you rebind those actions in
-  `~/.claude/keybindings.json`, the effort keys move with them.
-- **On macOS, Ctrl+↑ and Ctrl+↓ are Mission Control's** (Mission Control and
-  Application windows) unless you turn those shortcuts off; [Install](#install)
-  says how, and which keys to use instead.
-- **Ultracode is not a step.** It is a separate on/off switch that works at
-  any level (`/effort ultracode on`), and the plugin API exposes no way to
-  switch it.
+  ([#1](https://github.com/Anerco/claude-code-effort-cycle/issues/1)). The
+  footer shows the level requests go out with.
+- **A pick is lost on restart.** A plugin cannot write settings, so it cannot
+  save the level the way `/effort` and Alt+P do.
+- **Before the first request, the footer works the level out.** An
+  organization's default, or one set on Anthropic's side, can differ. From the
+  first request the footer follows Claude Code; a pick made before it stands.
+- **A subagent shows `—` until its first model request.** One started before
+  the plugin loaded shows no model either, until its next request.
+- **‹ › need mouse events**, as in Claude Code's fullscreen view. In tmux, add
+  `set -g mouse on`. Without them, use the keys.
+- **Ctrl+↑ and Ctrl+↓ are borrowed from the diff panel.** While `/diff` lists
+  more than eight files they scroll it instead; close it to step again.
+  Rebinding `app:diffFileListUp` and `app:diffFileListDown` moves them too.
+- **On macOS, Ctrl+↑ and Ctrl+↓ belong to Mission Control** unless you turn
+  them off in System Settings → Keyboard → Keyboard Shortcuts → Mission
+  Control. Option+↑ and Option+↓ work too ([Install](#install)).
+- **The tasks list's levels need `python3`.** A `subagentStatusLine` in your
+  own settings replaces the plugin's. On Windows they show only where Claude
+  Code runs commands through Git Bash.
+- **Ultracode is not a step.** It is a separate switch the plugin API cannot reach.
 
-## Develop
+## How it works
 
-```sh
-claude plugin validate .
-claude plugin test .
-tsc -p .
-```
-
-Claude Code writes the API declarations an editor and `tsc` type the mod
-against into `.claude-plugin/types` each time it loads the folder. They are
-generated per Claude Code build and are not committed.
+See [docs/how-it-works.md](docs/how-it-works.md) for what the plugin hooks, the
+tasks list's row files, Remote Control and development.
 
 ## Privacy
 
-effort-cycle collects no personal data. It reads Claude Code's own settings,
-the `CLAUDE_CODE_EFFORT_LEVEL` variable and the session's model and agents,
-keeps each agent's effort level in session state on your machine, and sends
-nothing to any server: no telemetry, no network requests. For the tasks
-list's rows it also writes each subagent's model and level to a file under
-`~/.claude/subagent-rows`, which the script deletes a week after the session
-last wrote it, and sets `EFFORT_CYCLE_ROWS` to its script's path in Claude
-Code's environment; otherwise nothing is kept after the session ends.
+No telemetry, no network requests. effort-cycle reads your settings,
+`CLAUDE_CODE_EFFORT_LEVEL` and the session's model and agents, and keeps levels
+in the session. For the tasks list it writes subagent levels under
+`~/.claude/subagent-rows/sessions/` (deleted after a week) and sets one variable,
+`EFFORT_CYCLE_ROWS`.
 
 ## License
 
-MIT
+[MIT](LICENSE)
