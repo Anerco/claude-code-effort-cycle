@@ -11,7 +11,7 @@ agent's row. A row reads the agent's name (the Agent call's description), then w
 for that agent, then what it is doing (its progress summary), then, dim, how long it has run and its
 tokens as Claude Code's own row shows them, joined by ` · `:
 
-    Fix the parser · ‹▰▰▰▱▱› high · ⎇4 ahead 3 files · Reading failing note test · 53m 11s · ↓ 499.8k tokens
+    Fix the parser · Opus 5.5 ▰▰▰▱▱ high · ⎇4 ahead 3 files · Reading failing note test · 53m 11s · ↓ 499.8k tokens
 
 A row too wide for the list loses its tokens, then its time, then is cut in its activity, then in its
 name, then loses plugins' parts from the end. The time shows only while the agent runs: the context

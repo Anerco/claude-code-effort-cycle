@@ -1,6 +1,6 @@
 /** A subagent's effort: what its own requests carried and what the keys picked for it. */
 export type AgentEffort = {
-  /** The model its last request named. */
+  /** The model its last request named; before any, the one its spawn resolved. */
   model: string
   /** The engine's level on its last request, before the keys' pick: the one it was spawned with (its definition's effort, else the parent's) or the engine's since; null until a request of its carries a level. */
   base: string | null
@@ -29,8 +29,10 @@ declare module 'claude-code' {
       flash: { id: number; from: number; to: number; agentId: string | null } | null
       /** The block the sweep lights at max while Claude works, by index; null between sweeps and otherwise. */
       swept: number | null
-      /** Each subagent's level as its row in the tasks list last got it, by agent id. */
-      listed: Record<string, string>
+      /** Each subagent's level for its row in the tasks list, by agent id, as the file last got it or gets it at its next write; null for one whose spawn said its model and no request yet its level. */
+      listed: Record<string, string | null>
+      /** The running count of presses each footer caret last posted, by the caret's id, so a later post steps by how far it moved. */
+      pressesSeen: StateFamily<number>
     }
   }
 }

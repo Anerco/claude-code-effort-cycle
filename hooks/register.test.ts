@@ -8,10 +8,12 @@ const engineBand = (on: On) => on('ui.render', { component: 'AbovePrompt' }, ():
 const engineModes = (on: On) => on('ui.render', { component: 'SessionMode' }, (): RenderElement => ({ type: 'Box', props: { key: 'engine-modes' }, children: [] }))
 const BAND: RenderPropsOf['AbovePrompt'] = { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120, scroll: { offset: 0, bodyRows: 19 }, view: {} }
 const agent = (id: string, type: string, description = 'a task'): AgentInfo => ({ id, description, type, status: 'running' })
+// The footer's label as read in the tests, its cells kept for the hidden carets closed up to one space: `Opus 5.5 ▰▰▰▱▱ high`.
+const spaced = (text: string | undefined) => text?.replace(/ +/g, ' ').trim()
 
 // A session on Opus 5.5 at high with two subagents, an Explore and a general-purpose; `sent` holds each
 // request's agent and effort as it left the plugin, and `view` opens a transcript as the tasks list does.
-async function world($: Engine, on: On, settings: Record<string, unknown> = { effortLevel: 'high' }) {
+async function world($: Engine, on: On, settings: Record<string, unknown> = { effortLevel: 'high' }, surface: 'terminal' | 'desktop' = 'terminal') {
   engineBand(on)
   engineModes(on)
   const clock = mock.clock(on)
@@ -25,21 +27,26 @@ async function world($: Engine, on: On, settings: Record<string, unknown> = { ef
     sent.push(`${e.agentId ?? 'main'}:${e.effort}`)
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: null, usage: null }
   })
-  const request = async (effort: string, agentId?: string) => {
-    const stream = $.turn.step({ turnId: 't', index: 0, model: 'claude-opus-5-5', effort, messageCount: 1, ...(agentId && { agentId }) } as any)
+  const request = async (effort: string, agentId?: string, model = 'claude-opus-5-5') => {
+    const stream = $.turn.step({ turnId: 't', index: 0, model, effort, messageCount: 1, ...(agentId && { agentId }) } as any)
     for await (const _ of stream);
   }
-  const band = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'AbovePrompt', props: BAND })
-  const label = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  const band = await $.ui.mount({ plugin: 'effort-cycle', surface, component: 'AbovePrompt', props: BAND })
+  const label = await $.ui.mount({ plugin: 'effort-cycle', surface, component: 'SessionMode', props: { modes: [] } })
   await clock.settle()
-  const footer = async () => (await label.find({ key: 'effort' }))?.text.trim()
+  const footer = async () => spaced((await label.find({ key: 'effort' }))?.text)
   const view = async (agentId?: string) => {
     await band.redraw({ ...BAND, view: agentId === undefined ? {} : { agentId } })
     await clock.settle()
   }
   const up = () => band.press({ key: 'effort-up' })
   const down = () => band.press({ key: 'effort-down' })
-  return { clock, band, listed, sent, request, footer, view, up, down }
+  // A click on a footer caret as the surface reports it, on one of its three cells: the left button down, then up.
+  const click = async (caret: 'effort-down' | 'effort-up', x = 1) => {
+    await label.pointer({ type: 'down', x, y: 0, button: 'left', in: caret })
+    await label.pointer({ type: 'up', x, y: 0, button: 'left', in: caret })
+  }
+  return { clock, band, label, listed, sent, request, footer, view, up, down, click }
 }
 
 test('Alt+E steps the level up and Alt+Shift+E down, stopping at the ends, the footer shows model and level, main-loop requests carry it, the engine taking over drops it', async ($, on) => {
@@ -60,7 +67,7 @@ test('Alt+E steps the level up and Alt+Shift+E down, stopping at the ends, the f
     props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120 } as any,
   })
   const label = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
-  const footer = async () => (await label.find({ key: 'effort' }))?.text.trim()
+  const footer = async () => spaced((await label.find({ key: 'effort' }))?.text)
   const press = () => band.press({ key: 'effort-up' })
   const pressDown = () => band.press({ key: 'effort-down' })
 
@@ -96,7 +103,7 @@ test('the keys step only through the levels the include toggles allow', { option
     props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120 } as any,
   })
   const label = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
-  const footer = async () => (await label.find({ key: 'effort' }))?.text.trim()
+  const footer = async () => spaced((await label.find({ key: 'effort' }))?.text)
   const up = () => band.press({ key: 'effort-up' })
   const down = () => band.press({ key: 'effort-down' })
 
@@ -151,7 +158,7 @@ test('at max the model name turns red, and a press past either end lights the wo
   })
   const label = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
   const name = () => label.find({ type: 'Text', text: 'Opus 5.5' })
-  const word = () => label.find({ type: 'Text', text: /^ [a-z]+ *$/ })
+  const word = () => label.find({ type: 'Text', text: /^[a-z]+ *$/ })
   const blocks = async () => (await label.findAll({ type: 'Text', text: /^[▰▱]$/ })).map(b => b.text + (b.props.color ?? 'dim'))
 
   expect((await name())?.props).toMatchObject({ dimColor: true })
@@ -209,7 +216,7 @@ test('the band keeps what the plugins beneath draw there, and Alt+E and Alt+Shif
     props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 120 } as any,
   })
   const label = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
-  const footer = async () => (await label.find({ key: 'effort' }))?.text.trim()
+  const footer = async () => spaced((await label.find({ key: 'effort' }))?.text)
   const theirs = async () => (await band.find({ key: 'other' }))?.text
 
   expect(await theirs()).toBe('theirs')
@@ -296,7 +303,7 @@ test('two surfaces drawing the band keep their own view: the terminal in a subag
   // A remote surface (Claude Code Desktop, attached over Remote Control) draws the band and footer too, on the main thread.
   await $.ui.mount({ plugin: 'effort-cycle', surface: 'desktop', component: 'AbovePrompt', props: BAND })
   const remote = await $.ui.mount({ plugin: 'effort-cycle', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
-  const remoteFooter = async () => (await remote.find({ key: 'effort' }))?.text.trim()
+  const remoteFooter = async () => spaced((await remote.find({ key: 'effort' }))?.text)
   await view('a1')
   expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
   expect(await remoteFooter()).toBe('Opus 5.5 ▰▰▰▱▱ high')
@@ -322,27 +329,31 @@ function files(on: On) {
   return { writes, parts }
 }
 
-test('with a subagentStatusLine command in settings, each subagent\'s level is left for its tasks list row, and follows the keys', async ($, on) => {
+test('with a subagentStatusLine command in settings, each subagent\'s model and level are left for its tasks list row as the footer writes them, with no carets, and follow the keys', async ($, on) => {
   const { writes, parts } = files(on)
   const { request, view, up } = await world($, on, { effortLevel: 'high', subagentStatusLine: { type: 'command', command: 'rows' } })
-  await request('medium', 'a1')
+  await request('medium', 'a1', 'claude-sonnet-5-5')
   await request('high', 'a2')
   expect(writes.at(-1)?.path).toBe('/home/u/.claude/subagent-rows/sessions/s1/effort-cycle.json')
-  expect(parts()).toEqual({ order: 10, agents: { a1: '‹▰▰▱▱▱› medium', a2: '‹▰▰▰▱▱› high' } })
-  // The blocks and the word take the level's color.
-  expect(JSON.parse(writes.at(-1)!.text).agents.a2).toBe('‹\x1b[33m▰▰▰\x1b[39m▱▱› \x1b[33mhigh\x1b[39m')
+  expect(parts()).toEqual({ order: 10, agents: { a1: 'Sonnet 5.5 ▰▰▱▱▱ medium', a2: 'Opus 5.5 ▰▰▰▱▱ high' } })
+  // The footer's colors: the model dim, the filled blocks and the word in the level's color, the empty blocks dim.
+  expect(JSON.parse(writes.at(-1)!.text).agents.a2).toBe('\x1b[2mOpus 5.5\x1b[22m \x1b[33m▰▰▰\x1b[39m\x1b[2m▱▱\x1b[22m \x1b[33mhigh\x1b[39m')
 
   // A request at the level it already has writes nothing.
   const before = writes.length
-  await request('medium', 'a1')
+  await request('medium', 'a1', 'claude-sonnet-5-5')
   expect(writes.length).toBe(before)
   await view('a1')
   await up()
-  expect(parts().agents).toEqual({ a1: '‹▰▰▰▱▱› high', a2: '‹▰▰▰▱▱› high' })
+  expect(parts().agents).toEqual({ a1: 'Sonnet 5.5 ▰▰▰▱▱ high', a2: 'Opus 5.5 ▰▰▰▱▱ high' })
+  // At max the model's name turns red too and the word is bold, as in the footer.
+  await up()
+  await up()
+  expect(JSON.parse(writes.at(-1)!.text).agents.a1).toBe('\x1b[31mSonnet 5.5\x1b[39m \x1b[31m▰▰▰▰▰\x1b[39m \x1b[1;31mmax\x1b[22;39m')
   // The main thread has no row there: its steps write nothing.
   await view()
   await up()
-  expect(writes.length).toBe(before + 1)
+  expect(writes.length).toBe(before + 3)
 })
 
 test('without a subagentStatusLine command nothing is written, and the levels it kept go out at the first write once there is one', async ($, on) => {
@@ -353,5 +364,325 @@ test('without a subagentStatusLine command nothing is written, and the levels it
   expect(writes).toEqual([])
   settings.subagentStatusLine = { type: 'command', command: 'rows' }
   await request('xhigh', 'a2')
-  expect(parts().agents).toEqual({ a1: '‹▰▰▱▱▱› medium', a2: '‹▰▰▰▰▱› xhigh' })
+  expect(parts().agents).toEqual({ a1: 'Opus 5.5 ▰▰▱▱▱ medium', a2: 'Opus 5.5 ▰▰▰▰▱ xhigh' })
+})
+
+// An Agent call's spawn as the engine answers it, for the agent `agentId` on `subagentType`.
+const spawnCall = ($: Engine, tool_use_id: string, subagentType: string) =>
+  $.agent.spawn({ tool_use_id, description: 'a task', prompt: 'Do it.', subagentType, provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', background: true, fork: false } as any)
+
+test('a subagent\'s spawn writes its row\'s part at once, its model beside the footer\'s empty meter, which the footer shows too, and its first request fills in the level', async ($, on) => {
+  const { writes, parts } = files(on)
+  on('agent.spawn', (_, e) => ({ model: e.tool_use_id === 'toolu_a' ? 'claude-sonnet-5-5' : 'claude-opus-5-5', agentId: e.tool_use_id === 'toolu_a' ? 'a1' : 'a2' }))
+  const { request, footer, view, up } = await world($, on, { effortLevel: 'high', subagentStatusLine: { type: 'command', command: 'rows' } })
+  await spawnCall($, 'toolu_a', 'Explore')
+  expect(writes.at(-1)?.path).toBe('/home/u/.claude/subagent-rows/sessions/s1/effort-cycle.json')
+  expect(parts()).toEqual({ order: 10, agents: { a1: 'Sonnet 5.5 ▱▱▱▱▱ —' } })
+  expect(JSON.parse(writes.at(-1)!.text).agents.a1).toBe('\x1b[2mSonnet 5.5\x1b[22m \x1b[2m▱▱▱▱▱\x1b[22m \x1b[2m—\x1b[22m')
+  await spawnCall($, 'toolu_b', 'general-purpose')
+  expect(parts().agents).toEqual({ a1: 'Sonnet 5.5 ▱▱▱▱▱ —', a2: 'Opus 5.5 ▱▱▱▱▱ —' })
+  expect(writes.length).toBe(2)
+  await view('a1')
+  expect(await footer()).toBe('Explore · Sonnet 5.5 ▱▱▱▱▱ —')
+  // The level is still unknown: a press says wait, as before, and writes nothing.
+  await up()
+  expect(await footer()).toBe('Explore · Sonnet 5.5 ▱▱▱▱▱ wait')
+  expect(writes.length).toBe(2)
+  await request('high', 'a2')
+  expect(parts().agents).toEqual({ a1: 'Sonnet 5.5 ▱▱▱▱▱ —', a2: 'Opus 5.5 ▰▰▰▱▱ high' })
+  await request('medium', 'a1', 'claude-sonnet-5-5')
+  expect(parts().agents).toEqual({ a1: 'Sonnet 5.5 ▰▰▱▱▱ medium', a2: 'Opus 5.5 ▰▰▰▱▱ high' })
+  expect(await footer()).toBe('Explore · Sonnet 5.5 ▰▰▱▱▱ medium')
+})
+
+test('without a subagentStatusLine command a spawn writes nothing either', async ($, on) => {
+  const { writes } = files(on)
+  on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'a1' }))
+  const { footer, view } = await world($, on)
+  await spawnCall($, 'toolu_a', 'Explore')
+  expect(writes).toEqual([])
+  await view('a1')
+  expect(await footer()).toBe('Explore · Opus 5.5 ▱▱▱▱▱ —')
+})
+
+// The host beneath the width nudge: the surfaces said to draw the session, and each command the plugin ran there,
+// which a host that cannot start it (no python3) refuses.
+function host(on: On, surfaces: readonly ('terminal' | 'desktop')[] = ['terminal'], { canRun = true } = {}) {
+  const runs: (readonly string[])[] = []
+  on('session.surfaces', () => ({ value: surfaces }))
+  on('process.run', (_, e) => {
+    runs.push(e.argv)
+    if (!canRun) return { deny: 'python3: command not found' }
+    return { value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  return runs
+}
+const ROWS = { effortLevel: 'high', subagentStatusLine: { type: 'command', command: 'rows' } }
+// The command a nudge runs: python3, isolated, the script narrowing and restoring the terminal's width.
+const NUDGE = ['python3', '-I', '-S', '-c', expect.stringContaining('TIOCSWINSZ')]
+
+test('with "Tasks list rows: update at once" off, as by default, a changed level is written and the terminal is left alone', async ($, on) => {
+  const { writes } = files(on)
+  const runs = host(on)
+  const { clock, request, view, up, click } = await world($, on, ROWS)
+  await request('medium', 'a1')
+  await view('a1')
+  await up()
+  await clock.advance(1000)
+  await click('effort-up')
+  await clock.settle()
+  expect(writes.length).toBe(3)
+  expect(runs).toEqual([])
+})
+
+test('with it on, a written change nudges the terminal, once a burst: the first change at once, those within 250 ms riding on it, a later one again; the engine taking over nudges too, a spawn\'s write and the main thread\'s steps do not', { options: { nudgeRows: true } }, async ($, on) => {
+  const { writes, parts } = files(on)
+  const runs = host(on)
+  on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'a1' }))
+  const { clock, request, view, up, down, click, footer } = await world($, on, ROWS)
+  // The spawn's write: Claude Code reruns the command for a new agent by itself.
+  await spawnCall($, 'toolu_a', 'Explore')
+  await clock.settle()
+  expect(writes.length).toBe(1)
+  expect(runs).toEqual([])
+  // The agent's first request says its level: a change, written and nudged.
+  await request('medium', 'a1')
+  await clock.settle()
+  expect(runs).toEqual([NUDGE])
+
+  // A burst of presses and a click within 250 ms of it: each written, none nudging again.
+  await view('a1')
+  await clock.advance(100)
+  await up()
+  await up()
+  await click('effort-down')
+  await clock.advance(149)
+  await down()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
+  expect(writes.length).toBe(6)
+  expect(runs.length).toBe(1)
+  // A press after that nudges again, and starts a new burst.
+  await clock.advance(1)
+  await up()
+  await up()
+  expect(parts().agents).toEqual({ a1: 'Opus 5.5 ▰▰▰▰▱ xhigh' })
+  expect(runs.length).toBe(2)
+  // Up to max, a change, nudges; a press past the end changes nothing, so writes and nudges nothing.
+  await clock.advance(1000)
+  await up()
+  expect(runs.length).toBe(3)
+  await clock.advance(1000)
+  await up()
+  expect(writes.length).toBe(9)
+  expect(runs.length).toBe(3)
+  // The engine taking over (the person's /effort, inherited) is a change too.
+  await clock.advance(1000)
+  await request('low', 'a1')
+  await clock.settle()
+  expect(parts().agents).toEqual({ a1: 'Opus 5.5 ▰▱▱▱▱ low' })
+  expect(runs.length).toBe(4)
+  // The main thread has no row: its steps write and nudge nothing.
+  await view()
+  await clock.advance(1000)
+  await up()
+  await clock.settle()
+  expect(writes.length).toBe(10)
+  expect(runs.length).toBe(4)
+  expect(runs.every(run => JSON.stringify(run) === JSON.stringify(runs[0]))).toBe(true)
+})
+
+test('with it on, nothing is nudged where no terminal draws the session (a desktop or remote host, a headless run)', { options: { nudgeRows: true } }, async ($, on) => {
+  const { writes } = files(on)
+  const runs = host(on, ['desktop'])
+  const { clock, request, view, up } = await world($, on, ROWS, 'desktop')
+  await request('medium', 'a1')
+  await view('a1')
+  for (let i = 0; i < 3; i++) {
+    await clock.advance(1000)
+    await up()
+  }
+  await clock.settle()
+  expect(writes.length).toBe(4)
+  expect(runs).toEqual([])
+})
+
+test('with it on, a host that cannot start the nudge (no python3) never reaches the keys or the clicks, and is not asked again', { options: { nudgeRows: true } }, async ($, on) => {
+  const { parts } = files(on)
+  const runs = host(on, ['terminal'], { canRun: false })
+  const { clock, request, view, up, click, footer } = await world($, on, ROWS)
+  await request('medium', 'a1')
+  await view('a1')
+  await clock.advance(1000)
+  await up()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▱▱ high')
+  await clock.advance(1000)
+  await click('effort-up')
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▰▱ xhigh')
+  await clock.settle()
+  expect(parts().agents).toEqual({ a1: 'Opus 5.5 ▰▰▰▰▱ xhigh' })
+  expect(runs.length).toBe(1)
+})
+
+test('a spawn that resolves after the agent\'s first request leaves what the request said', async ($, on) => {
+  on('agent.spawn', () => ({ model: 'claude-opus-5-5', agentId: 'a1' }))
+  const { request, footer, view } = await world($, on)
+  await request('medium', 'a1', 'claude-sonnet-5-5')
+  await $.agent.spawn({ tool_use_id: 'toolu_a', description: 'a task', prompt: 'Do it.', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', background: true, fork: false } as any)
+  await view('a1')
+  expect(await footer()).toBe('Explore · Sonnet 5.5 ▰▰▱▱▱ medium')
+})
+
+// The footer's label as the surface paints it: a Box placed over its cells (a caret) hidden, or, while the pointer is
+// over the label and the label's hover reveals it, painted over them, a Client in it as its module drew it.
+async function painted(label: { find: (q: { key: string }) => Promise<{ children: unknown[] } | undefined>; drawn: (scope?: { in?: string }) => Promise<unknown> }, isHovered: boolean): Promise<string> {
+  type Node = { type?: string; props?: Record<string, unknown>; hover?: Record<string, unknown>; children?: unknown[] }
+  const read = async (node: unknown): Promise<string> => {
+    if (typeof node === 'string') return node
+    const { type, props = {}, children = [] } = node as Node
+    if (type === 'Client') return read(await label.drawn({ in: String(props.key) }))
+    const placed = children.find(child => (child as Node).props?.position === 'absolute') as Node | undefined
+    if (placed !== undefined && isHovered && placed.hover?.display === 'flex') return (await Promise.all((placed.children ?? []).map(read))).join('')
+    return (await Promise.all(children.filter(child => child !== placed).map(read))).join('')
+  }
+  return (await Promise.all(((await label.find({ key: 'effort' }))?.children ?? []).map(read))).join('')
+}
+
+// The path from the label's keyed Box down to a caret's Client: every Box on the way, and the Client.
+function pathTo(tree: unknown, key: string): { type?: string; props?: Record<string, unknown>; hover?: Record<string, unknown> }[] | undefined {
+  type Node = { type?: string; props?: Record<string, unknown>; hover?: Record<string, unknown>; children?: unknown[] }
+  const node = tree as Node
+  if (typeof tree !== 'object' || tree === null) return undefined
+  if (node.type === 'Client' && node.props?.key === key) return [node]
+  for (const child of node.children ?? []) {
+    const below = pathTo(child, key)
+    if (below !== undefined) return [node, ...below]
+  }
+  return undefined
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`on the ${surface}, the footer keeps three blank cells either side of the meter and word, where a ‹ and a › show while the pointer is over the label, never inverted`, async ($, on) => {
+    const { label, up, footer } = await world($, on, undefined, surface)
+    expect((await label.find({ key: 'effort' }))?.text).toBe('Opus 5.5   ▰▰▰▱▱ high     ')
+    expect(await painted(label, false)).toBe('Opus 5.5   ▰▰▰▱▱ high     ')
+    expect(await painted(label, true)).toBe('Opus 5.5 ‹ ▰▰▰▱▱ high   › ')
+    // Nothing moves as the level changes: the word's slot is as wide as the widest, so the › stays where it was clicked.
+    await up()
+    expect(await painted(label, true)).toBe('Opus 5.5 ‹ ▰▰▰▰▱ xhigh  › ')
+    await up()
+    expect(await painted(label, true)).toBe('Opus 5.5 ‹ ▰▰▰▰▰ max    › ')
+    expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▰ max')
+
+    // Each caret is drawn hidden in a Box placed over its cells, which the hover of the label's keyed Box reveals: no
+    // keyed Box between the two, which would make the caret's own cells its scope.
+    for (const key of ['effort-down', 'effort-up']) {
+      const path = pathTo((await label.find({ key: 'effort' })) as unknown, key)!
+      const [cells, placed, client] = path.slice(-3)
+      expect(path[0]?.props?.key).toBe('effort')
+      expect(path.slice(1, -1).every(box => box.props?.key === undefined)).toBe(true)
+      expect(cells?.props).toMatchObject({ width: 3, flexShrink: 0 })
+      expect(placed?.props).toMatchObject({ position: 'absolute', top: 0, left: 0, display: 'none' })
+      expect(placed?.hover).toEqual({ display: 'flex' })
+      expect(client?.props).toMatchObject({ width: 3, height: 1 })
+    }
+
+    // Dim at rest, at full strength under the pointer, and never inverted, held or not.
+    const caret = async () => (await label.find({ type: 'Text', text: /^‹$/, in: 'effort-down' }))?.props
+    const drawings = async () => JSON.stringify([await label.drawn(), await label.drawn({ in: 'effort-down' }), await label.drawn({ in: 'effort-up' })])
+    expect(await caret()).toMatchObject({ dimColor: true })
+    await label.pointer({ type: 'enter', x: 1, y: 0, in: 'effort-down' })
+    expect(await caret()).toMatchObject({ dimColor: false })
+    await label.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'effort-down' })
+    expect(await drawings()).not.toContain('inverse')
+    await label.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'effort-down' })
+    await label.pointer({ type: 'leave', x: 1, y: 0, in: 'effort-down' })
+    expect(await caret()).toMatchObject({ dimColor: true })
+    expect(await drawings()).not.toContain('inverse')
+  })
+
+  test(`on the ${surface}, a click on › steps up and on ‹ down as Alt+E and Alt+Shift+E do, for the agent the footer shows: stopping at the ends with the word lit, and saying wait while an agent's level is unknown`, async ($, on) => {
+    const { clock, sent, request, footer, view, click, label } = await world($, on, undefined, surface)
+    const word = () => label.find({ type: 'Text', text: /^[a-z]+ *$/ })
+    await click('effort-up')
+    expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▱ xhigh')
+    // The block it filled lights for a moment, as after a key.
+    expect((await label.findAll({ type: 'Text', text: /^[▰▱]$/ })).map(b => b.props.color ?? 'dim')).toEqual(['claude', 'claude', 'claude', 'text', 'dim'])
+    await click('effort-up')
+    await click('effort-up')
+    expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▰ max')
+    expect((await word())?.props).toMatchObject({ color: 'text', bold: true })
+    await clock.advance(1000)
+    expect((await word())?.props).toMatchObject({ color: 'error', bold: true })
+    await request('high')
+    expect(sent.at(-1)).toBe('main:max')
+
+    // In a subagent's transcript the carets step that agent alone.
+    await request('medium', 'a1')
+    await view('a1')
+    await click('effort-down')
+    await click('effort-down')
+    expect(await footer()).toBe('Explore · Opus 5.5 ▰▱▱▱▱ low')
+    expect((await word())?.props).toMatchObject({ color: 'text', bold: true })
+    await request('medium', 'a1')
+    expect(sent.at(-1)).toBe('a1:low')
+    await view()
+    expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▰ max')
+    // An agent no request of whose has said its level yet: a click leaves it and says wait.
+    await view('a2')
+    await click('effort-up')
+    expect(await footer()).toBe('general-purpose · ▱▱▱▱▱ wait')
+    await clock.advance(1000)
+    expect(await footer()).toBe('general-purpose · ▱▱▱▱▱ —')
+  })
+}
+
+test('every click on a caret steps once, however quick: on any of its three cells, clicks whose steps overlap, a post the frame replaced', async ($, on) => {
+  const { footer, click, label, up } = await world($, on)
+  for (const x of [0, 1, 2]) await click('effort-down', x)
+  expect(await footer()).toBe('Opus 5.5 ▰▱▱▱▱ low')
+  for (const x of [0, 1, 2]) await click('effort-up', x)
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▱ xhigh')
+  // Two clicks, and a key, whose steps would run at once: each reads the level the one before wrote.
+  await Promise.all([click('effort-down'), click('effort-down'), up()])
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+
+  // A caret posts its running count of presses: the first post heard counts each press so far, a later one the presses
+  // since, so the posts a frame replaced still step; a post heard twice steps nothing the second time.
+  const post = (presses: number) => label.post({ caret: 'c1', presses, by: -1 }, { in: 'effort-down' })
+  await post(1)
+  expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
+  await post(2)
+  await post(2)
+  expect(await footer()).toBe('Opus 5.5 ▰▱▱▱▱ low')
+  await label.post({ caret: 'c2', presses: 3, by: 1 }, { in: 'effort-up' })
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▱ xhigh')
+  // A count below the last one heard is a caret whose module loaded again: all of it is new.
+  await post(1)
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+  // Anything else a module posts steps nothing.
+  await label.post({ caret: 'c1', presses: 9, by: 2 }, { in: 'effort-down' })
+  await label.post('down', { in: 'effort-down' })
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+})
+
+test('the carets step only through the levels the include toggles allow', { options: { includeLow: false, includeMax: false } }, async ($, on) => {
+  const { footer, click } = await world($, on, { effortLevel: 'medium' })
+  for (let i = 0; i < 3; i++) await click('effort-up')
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▱ xhigh')
+  for (let i = 0; i < 3; i++) await click('effort-down')
+  expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
+})
+
+test('each surface\'s carets step the agent its own footer shows: the terminal in a subagent, a remote surface on the main thread', async ($, on) => {
+  const { request, footer, view, click } = await world($, on)
+  await request('medium', 'a1')
+  await $.ui.mount({ plugin: 'effort-cycle', surface: 'desktop', component: 'AbovePrompt', props: BAND })
+  const remote = await $.ui.mount({ plugin: 'effort-cycle', surface: 'desktop', component: 'SessionMode', props: { modes: [] } })
+  const remoteFooter = async () => spaced((await remote.find({ key: 'effort' }))?.text)
+  await view('a1')
+  await click('effort-up')
+  await remote.pointer({ type: 'down', x: 1, y: 0, button: 'left', in: 'effort-down' })
+  await remote.pointer({ type: 'up', x: 1, y: 0, button: 'left', in: 'effort-down' })
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▱▱ high')
+  expect(await remoteFooter()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
 })

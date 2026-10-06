@@ -1,19 +1,20 @@
 {
   "name": "effort-cycle",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "author": { "name": "Aner Cohen" },
   "homepage": "https://github.com/Anerco/claude-code-effort-cycle#readme",
   "repository": "https://github.com/Anerco/claude-code-effort-cycle",
   "supportUrl": "https://github.com/Anerco/claude-code-effort-cycle/issues",
   "privacyPolicyUrl": "https://github.com/Anerco/claude-code-effort-cycle#privacy",
   "license": "MIT",
-  "description": "Alt+E steps the effort level up and Alt+Shift+E down, for the main thread or the subagent in view; the footer shows that agent's model and level as they change",
+  "description": "Alt+E steps the effort level up and Alt+Shift+E down, for the main thread or the subagent in view; the footer shows that agent's model and level as they change, with a ‹ and › to click while the pointer is over it",
   "types": "./types/index.d.ts",
   "userConfig": {
-    "includeLow": { "type": "boolean", "title": "Effort keys: include low", "description": "Alt+E and Alt+Shift+E step through low.", "default": true },
-    "includeMedium": { "type": "boolean", "title": "Effort keys: include medium", "description": "Alt+E and Alt+Shift+E step through medium.", "default": true },
-    "includeHigh": { "type": "boolean", "title": "Effort keys: include high", "description": "Alt+E and Alt+Shift+E step through high.", "default": true },
-    "includeXhigh": { "type": "boolean", "title": "Effort keys: include xhigh", "description": "Alt+E and Alt+Shift+E step through xhigh.", "default": true },
-    "includeMax": { "type": "boolean", "title": "Effort keys: include max", "description": "Alt+E and Alt+Shift+E step through max.", "default": true }
+    "includeLow": { "type": "boolean", "title": "Effort keys: include low", "description": "Alt+E, Alt+Shift+E and the footer's ‹ › step through low.", "default": true },
+    "includeMedium": { "type": "boolean", "title": "Effort keys: include medium", "description": "Alt+E, Alt+Shift+E and the footer's ‹ › step through medium.", "default": true },
+    "includeHigh": { "type": "boolean", "title": "Effort keys: include high", "description": "Alt+E, Alt+Shift+E and the footer's ‹ › step through high.", "default": true },
+    "includeXhigh": { "type": "boolean", "title": "Effort keys: include xhigh", "description": "Alt+E, Alt+Shift+E and the footer's ‹ › step through xhigh.", "default": true },
+    "includeMax": { "type": "boolean", "title": "Effort keys: include max", "description": "Alt+E, Alt+Shift+E and the footer's ‹ › step through max.", "default": true },
+    "nudgeRows": { "type": "boolean", "title": "Tasks list rows: update at once", "description": "When a subagent's level changes, narrow the terminal one column and back, so its tasks list row follows in about 0.4 s instead of up to 5 s. Costs two repaints per change and a brief one-column flicker at the right edge; needs the subagentStatusLine setting and python3. Relies on Claude Code internals.", "default": false }
   }
 }
