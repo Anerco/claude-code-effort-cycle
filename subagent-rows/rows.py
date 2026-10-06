@@ -1,9 +1,21 @@
 #!/usr/bin/env python3
 """Draws each subagent's row in Claude Code's tasks list, as a `subagentStatusLine` command.
 
-In ~/.claude/settings.json:
+The effort-cycle plugin names it in its own settings.json, which Claude Code applies while the plugin
+is enabled, so installing the plugin is enough:
+
+    "subagentStatusLine": { "type": "command", "command": "[ -z \"$EFFORT_CYCLE_ROWS\" ] || exec python3 -I -S \"$EFFORT_CYCLE_ROWS\"" }
+
+Claude Code substitutes no ${CLAUDE_PLUGIN_ROOT} there and runs the command in the session's folder,
+so the plugin's hooks set EFFORT_CYCLE_ROWS to this file's path in the installed version as the
+session starts; until they have, the command prints nothing and the rows stay Claude Code's own. A
+`subagentStatusLine` in the person's own settings wins over the plugin's, and can name this script
+anywhere else:
 
     "subagentStatusLine": { "type": "command", "command": "python3 ~/.claude/subagent-rows/rows.py" }
+
+It needs Python 3 and nothing outside its standard library, and reads and writes its JSON as UTF-8
+whatever the locale, so it runs the same on macOS and Linux.
 
 Claude Code runs it every five seconds while the session has subagents, with the rows' context as JSON
 on stdin, and draws each line it prints, `{"id": "<agent id>", "content": "<text>"}`, in place of that
@@ -108,7 +120,7 @@ def fragments(session_id):
     found = []
     for path in sorted(folder.glob("*.json")) if folder.is_dir() else []:
         try:
-            data = json.loads(path.read_text())
+            data = json.loads(path.read_text(encoding="utf-8"))
             agents = data.get("agents")
             if isinstance(agents, dict):
                 found.append((float(data.get("order", 0)), path.name, agents))
@@ -155,7 +167,8 @@ def prune(current):
 
 
 def main():
-    context = json.load(sys.stdin)
+    # Bytes in and ASCII out, so a locale that is not UTF-8 (LANG=C, as a GUI-started process may have) changes nothing.
+    context = json.loads(sys.stdin.buffer.read() or b"{}")
     session_id = str(context.get("session_id", ""))
     width = int(context.get("columns") or 80)
     plugins = fragments(session_id) if session_id else []
@@ -166,7 +179,7 @@ def main():
         activity = "" if label == name else label
         parts = [str(agents[task["id"]]) for agents in plugins if task["id"] in agents]
         content = row(name, parts, activity, width, stats(task, now_ms))
-        print(json.dumps({"id": task["id"], "content": content}, ensure_ascii=False))
+        print(json.dumps({"id": task["id"], "content": content}))
     prune(session_id)
 
 

@@ -312,22 +312,53 @@ test('two surfaces drawing the band keep their own view: the terminal in a subag
   expect(await remoteFooter()).toBe('Opus 5.5 ▰▰▰▱▱ high')
 })
 
-// The files the plugin writes, as the test records them, and where a tasks list row's parts go for session s1.
+// The files the plugin writes, as the test records them, and where a tasks list row's parts go for session s1; and the
+// process's environment, with each variable the plugin set.
 function files(on: On) {
   const writes: { path: string; text: string }[] = []
   on('fs.write', (_, e) => {
     writes.push(e)
     return { value: undefined }
   })
-  on('env.get', (_, e) => ({ value: e.name === 'HOME' ? '/home/u' : undefined }))
+  const env: Record<string, string | undefined> = { HOME: '/home/u' }
+  const sets: string[] = []
+  on('env.get', (_, e) => ({ value: env[e.name] }))
+  on('env.set', (_, e) => {
+    env[e.name] = e.value
+    sets.push(e.name)
+    return { value: undefined }
+  })
   on('session.id', () => ({ value: 's1' }))
   // The last write's parts, colors left out.
   const parts = () => {
     const last = JSON.parse(writes.at(-1)?.text ?? '{}') as { order?: number; agents?: Record<string, string> }
     return { ...last, agents: Object.fromEntries(Object.entries(last.agents ?? {}).map(([id, text]) => [id, text.replace(/\x1b\[[0-9;]*m/g, '')])) }
   }
-  return { writes, parts }
+  return { writes, parts, env, sets }
 }
+
+// The plugin's own setting, from its settings.json, as the merged settings hold it while no settings file names one.
+const PLUGIN_ROWS = { type: 'command', command: '[ -z "$EFFORT_CYCLE_ROWS" ] || exec python3 -I -S "$EFFORT_CYCLE_ROWS"' }
+
+test('as the session starts, EFFORT_CYCLE_ROWS names the installed version\'s rows.py, which the plugin\'s own subagentStatusLine command runs; a later start on the same install leaves it', async ($, on) => {
+  const { env, sets } = files(on)
+  on('session.start', (_, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  expect(env.EFFORT_CYCLE_ROWS).toMatch(/\/subagent-rows\/rows\.py$/)
+  expect(sets).toEqual(['EFFORT_CYCLE_ROWS'])
+  await $.session.start({ cwd: '/w', surface: 'terminal', isInteractive: true })
+  expect(sets).toEqual(['EFFORT_CYCLE_ROWS'])
+})
+
+test('with the plugin\'s own subagentStatusLine and no session start seen (the plugin enabled mid-session), the first write of the rows points EFFORT_CYCLE_ROWS at the script', async ($, on) => {
+  const { writes, parts, env } = files(on)
+  const { request } = await world($, on, { effortLevel: 'high', subagentStatusLine: PLUGIN_ROWS })
+  expect(env.EFFORT_CYCLE_ROWS).toBeUndefined()
+  await request('medium', 'a1')
+  expect(writes.length).toBe(1)
+  expect(parts().agents).toEqual({ a1: 'Opus 5.5 ▰▰▱▱▱ medium' })
+  expect(env.EFFORT_CYCLE_ROWS).toMatch(/\/subagent-rows\/rows\.py$/)
+})
 
 test('with a subagentStatusLine command in settings, each subagent\'s model and level are left for its tasks list row as the footer writes them, with no carets, and follow the keys', async ($, on) => {
   const { writes, parts } = files(on)

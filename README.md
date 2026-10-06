@@ -29,12 +29,12 @@ keyboard, per agent, without leaving a row in the transcript:
   copied. Each caret takes a click on itself or the cell either side of it.
 - A line under each Agent call in the transcript shows the level of the agent
   it started.
-- With one setting (see [Levels in the tasks list](#levels-in-the-tasks-list)),
-  each subagent's row in the tasks list under the prompt shows its model and
+- Each subagent's row in the tasks list under the prompt shows its model and
   level too, as the footer writes them:
-  `Fix the parser · Opus 5.5 ▰▰▰▱▱ high · Reading the failing test`. Claude
-  Code redraws those rows every five seconds; an optional toggle makes a row
-  follow a press in about 0.4 s instead.
+  `Fix the parser · Opus 5.5 ▰▰▰▱▱ high · Reading the failing test`
+  (see [Levels in the tasks list](#levels-in-the-tasks-list); it needs
+  `python3`). Claude Code redraws those rows every five seconds; an optional
+  toggle makes a row follow a press in about 0.4 s instead.
 
 ![Alt+E steps the effort meter up to max, a light sweeps the bar while Claude works, Alt+Shift+E steps back down](demo.gif)
 
@@ -52,8 +52,10 @@ Code Desktop), each surface follows its own view: the keys and that surface's
 ‹ › step the agent that surface is viewing. The ‹ › are drawn wherever the
 footer is: the terminal and the desktop.
 
-What it hooks: each model request, the main thread's and every subagent's, to
-read its effort level and set the one picked for that agent; each subagent's
+What it hooks: the session's start, to tell the tasks list's command where
+the plugin's script is; each model request, the main thread's and every
+subagent's, to read its effort level and set the one picked for that agent;
+each subagent's
 start, to tie the Agent call to the agent it started and note the model it
 runs on; the `/effort` and `/model` commands, which it lets run unchanged and
 only watches afterwards to drop its own level and redraw the footer; the
@@ -64,8 +66,10 @@ the band above the prompt, which says whose transcript is in view and where
 two hidden buttons take the keys, leaving whatever other plugins and Claude
 Code show there in place. It reads your settings and the session's list of
 agents and nothing else, sends nothing anywhere, and keeps its state in the
-session, save the levels it leaves for the tasks list's rows when you turn
-that on. With **Tasks list rows: update at once** on, it also runs a short
+session, save the levels it leaves for the tasks list's rows. It sets one
+environment variable, `EFFORT_CYCLE_ROWS`, to the path of its own
+`subagent-rows/rows.py`, which the commands Claude Code starts inherit. With
+**Tasks list rows: update at once** on, it also runs a short
 `python3` process on each change, which resizes the terminal and does nothing
 else.
 
@@ -85,6 +89,9 @@ changes between releases. This one is built and tested against Claude Code
    Or, to work on it, clone the repo and load the folder with
    `claude --plugin-dir <folder>`, or in every session through
    `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json`.
+
+   That is all the tasks list's rows need: the plugin brings their setting
+   with it ([Levels in the tasks list](#levels-in-the-tasks-list)).
 
 2. Bind the keys in `~/.claude/keybindings.json`:
 
@@ -110,19 +117,14 @@ changes between releases. This one is built and tested against Claude Code
 ## Levels in the tasks list
 
 A plugin cannot draw in the tasks list, but Claude Code draws its subagent
-rows from a command's output when `~/.claude/settings.json` names one as
-`subagentStatusLine`. This repo has one, `subagent-rows/rows.py` (it needs
-Python 3). Copy it somewhere of its own, outside the plugin, and name it in
-settings:
-
-```sh
-mkdir -p ~/.claude/subagent-rows
-curl -fsSL https://raw.githubusercontent.com/Anerco/claude-code-effort-cycle/main/subagent-rows/rows.py -o ~/.claude/subagent-rows/rows.py
-```
-
-```json
-"subagentStatusLine": { "type": "command", "command": "python3 ~/.claude/subagent-rows/rows.py" }
-```
+rows from a command's output when settings name one as `subagentStatusLine`,
+and a plugin may bring that setting with it. This one does, in its
+`settings.json`, which Claude Code applies while the plugin is enabled, so
+installing the plugin is all it takes. The command runs the plugin's own
+`subagent-rows/rows.py`, which needs `python3` on your `PATH`: on macOS the
+one that comes with the Xcode command line tools (`xcode-select --install`)
+or Homebrew's will do, as will any Python 3 on Linux. It uses nothing outside
+Python's standard library.
 
 Each row then reads the Agent call's description, the agent's model and level
 as the footer writes them, in the footer's colors (the model's name turns red
@@ -144,7 +146,36 @@ Alt+E press or a click within that, or in about 0.4 s with
 [Rows that follow at once](#rows-that-follow-at-once) on. The main thread has
 no row there, and its level stays in the footer.
 
-While the setting is there, the plugin writes each subagent's model and level
+Claude Code puts no `${CLAUDE_PLUGIN_ROOT}` into a plugin's settings and runs
+the command in the session's folder, and the plugin's folder changes with
+each version, so the setting cannot name the script's path. The plugin's
+setting is
+
+```json
+"subagentStatusLine": { "type": "command", "command": "[ -z \"$EFFORT_CYCLE_ROWS\" ] || exec python3 -I -S \"$EFFORT_CYCLE_ROWS\"" }
+```
+
+and the plugin sets `EFFORT_CYCLE_ROWS` to its own `rows.py` as the session
+starts. Until it has, the command prints nothing and the rows stay Claude
+Code's own.
+
+A `subagentStatusLine` in your own settings wins over the plugin's: plugin
+settings are the lowest layer, under the user, project and local files. The
+plugin still writes the levels while yours is in effect, so a command of your
+own can show them too, or run a copy of `rows.py` kept anywhere:
+
+```json
+"subagentStatusLine": { "type": "command", "command": "python3 ~/.claude/subagent-rows/rows.py" }
+```
+
+That is the setting this README had you add before 0.2.1. If it is in your
+`~/.claude/settings.json`, remove it, and the file
+`~/.claude/subagent-rows/rows.py` with it, and the plugin's own script takes
+over, updated with the plugin. Leave the `sessions` folder beside it: the
+plugin writes there.
+
+While a `subagentStatusLine` is in effect, the plugin's or yours, the plugin
+writes each subagent's model and level
 to `~/.claude/subagent-rows/sessions/<session id>/effort-cycle.json` as
 `{"order": 10, "agents": {"<agent id>": "<text>"}}`. The script joins every
 file in a session's folder by `order`, so another plugin can add its own part
@@ -237,10 +268,13 @@ marketplace).
   starts; its model it learns from the start. An agent started before the
   plugin loaded shows `—`, and no model, until its next request.
 - **The tasks list shows the levels only through a command.** The plugin API
-  draws no part of it, so its rows need the `subagentStatusLine` setting
-  ([Levels in the tasks list](#levels-in-the-tasks-list)), and follow a press
-  within five seconds, or about 0.4 s with
-  [Rows that follow at once](#rows-that-follow-at-once) on.
+  draws no part of it, so its rows come from the `subagentStatusLine` command
+  the plugin brings ([Levels in the tasks list](#levels-in-the-tasks-list)),
+  which needs `python3`, and follow a press within five seconds, or about
+  0.4 s with [Rows that follow at once](#rows-that-follow-at-once) on. A
+  `subagentStatusLine` of your own replaces the plugin's. The command is a
+  POSIX shell line, so on Windows it runs only where Claude Code runs such
+  commands through Git Bash.
 - **The keys and the ‹ › change only the agent in view.** To step another
   agent, open its transcript from the tasks list.
 - **The ‹ › need the pointer.** They show while the pointer is over the
@@ -269,9 +303,10 @@ generated per Claude Code build and are not committed.
 effort-cycle collects no personal data. It reads Claude Code's own settings
 and the session's model and agents, keeps each agent's effort level in session state
 on your machine, and sends nothing to any server: no telemetry, no network
-requests. With the `subagentStatusLine` setting it also writes each subagent's
-model and level to a file under `~/.claude/subagent-rows`, which the script deletes a week
-after the session last wrote it; otherwise nothing is kept after the session
+requests. For the tasks list's rows it also writes each subagent's model and
+level to a file under `~/.claude/subagent-rows`, which the script deletes a week
+after the session last wrote it, and sets `EFFORT_CYCLE_ROWS` to its script's
+path in Claude Code's environment; otherwise nothing is kept after the session
 ends.
 
 ## License

@@ -57,7 +57,14 @@ import type { AgentEffort } from '../types'
 // alt+p's effort is seen at the next request.
 //
 // The tasks list draws no part a mod can, but its rows take a `subagentStatusLine`
-// command's text: when settings name one, the mod leaves each subagent's model and
+// command's text, and a plugin may ship that setting: the plugin's settings.json names
+// `[ -z "$EFFORT_CYCLE_ROWS" ] || exec python3 -I -S "$EFFORT_CYCLE_ROWS"`, which Claude
+// Code applies beneath every settings file while the plugin is enabled. It substitutes no
+// ${CLAUDE_PLUGIN_ROOT} there and runs the command in the session's folder with this
+// process's environment, so the mod sets EFFORT_CYCLE_ROWS to its own
+// subagent-rows/rows.py as the session starts (see pointRows). A subagentStatusLine in
+// the person's own settings wins over the plugin's. While settings name one, either way,
+// the mod leaves each subagent's model and
 // level as the footer writes them, `Opus 5.5 ▰▰▰▱▱ high` in the footer's colors (no
 // carets: nothing there takes a click), in
 // ~/.claude/subagent-rows/sessions/<session id>/effort-cycle.json as
@@ -151,6 +158,8 @@ let sweeper: Timer | undefined
 // none is tried again until the plugin loads again. A reload starts both over.
 let lastNudgeAt: number | undefined
 let isNudgeBroken = false
+// Whether EFFORT_CYCLE_ROWS names this load's script (see pointRows).
+let isRowsPointed = false
 // The surfaces where a caret's module failed: their footer draws no carets until the plugin loads again.
 const caretsFailed = new Set<string>()
 
@@ -165,6 +174,13 @@ type Run = { text: string; style: Style }
 export const register: Register = (on, options) => {
   lastNudgeAt = undefined
   isNudgeBroken = false
+  isRowsPointed = false
+
+  // The plugin's own subagentStatusLine command runs the script EFFORT_CYCLE_ROWS names: this installed version's.
+  on('session.start', async ($, e, next) => {
+    await pointRows($)
+    return next(e)
+  })
 
   on('turn.step', async function* ($, e, next) {
     if (e.agentId !== undefined) {
@@ -427,9 +443,12 @@ async function listLevel($: Engine, options: PluginOptions, agentId: string, lev
   if ((await writeRows($, levels)) && options.nudgeRows === true) void nudgeRows($)
 }
 
-// Writes every subagent's part of its row, while settings name a subagentStatusLine command; true once written.
+// Writes every subagent's part of its row, while settings name a subagentStatusLine command (the plugin's own, from its
+// settings.json, or the person's); true once written.
 async function writeRows($: Engine, levels: Record<string, string | null>): Promise<boolean> {
   if ((await $.settings.read()).subagentStatusLine === undefined) return false
+  // A plugin enabled after the session started may not have seen it start.
+  if (!isRowsPointed) await pointRows($)
   const home = (await $.env.get('HOME')) ?? (await $.env.get('USERPROFILE'))
   if (home === undefined) return false
   const parts: Record<string, string> = {}
@@ -437,6 +456,21 @@ async function writeRows($: Engine, levels: Record<string, string | null>): Prom
   const file = `${home}/.claude/subagent-rows/sessions/${await $.session.id()}/effort-cycle.json`
   await $.fs.write(file, JSON.stringify({ order: ROW_ORDER, agents: parts }))
   return true
+}
+
+// Points the plugin's subagentStatusLine command at this installed version's rows.py. The plugin's settings.json cannot
+// name the script's path itself: Claude Code substitutes no ${CLAUDE_PLUGIN_ROOT} in a setting, runs the command in the
+// session's folder, and gives it no CLAUDE_PLUGIN_ROOT, but it does give it this process's environment. The install's
+// folder changes with each version, so the path is set on every load. Never rejects: unset, the command prints nothing
+// and the rows stay Claude Code's own.
+async function pointRows($: Engine): Promise<void> {
+  const script = `${$.plugin.root}/subagent-rows/rows.py`
+  try {
+    if ((await $.env.get('EFFORT_CYCLE_ROWS')) !== script) await $.env.set('EFFORT_CYCLE_ROWS', script)
+    isRowsPointed = true
+  } catch {
+    // Refused: tried again before the next write of the rows.
+  }
 }
 
 // The width nudge, /config's "Tasks list rows: update at once": Claude Code reruns the subagentStatusLine command every
