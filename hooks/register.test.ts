@@ -39,14 +39,18 @@ async function world($: Engine, on: On, settings: Record<string, unknown> = { ef
     await band.redraw({ ...BAND, view: agentId === undefined ? {} : { agentId } })
     await clock.settle()
   }
+  // Alt+E and Alt+Shift+E, as the person's keybindings.json binds them to strip:jump9 and strip:jump8.
   const up = () => band.press({ key: 'effort-up' })
   const down = () => band.press({ key: 'effort-down' })
+  // Alt+↑ and Alt+↓ (Ctrl+↑ and Ctrl+↓), Claude Code's own keys for the diff panel's file list, bound with no setup.
+  const upArrow = () => band.press({ key: 'effort-up-arrow' })
+  const downArrow = () => band.press({ key: 'effort-down-arrow' })
   // A click on a footer caret as the surface reports it, on one of its three cells: the left button down, then up.
   const click = async (caret: 'effort-down' | 'effort-up', x = 1) => {
     await label.pointer({ type: 'down', x, y: 0, button: 'left', in: caret })
     await label.pointer({ type: 'up', x, y: 0, button: 'left', in: caret })
   }
-  return { clock, band, label, listed, sent, request, footer, view, up, down, click }
+  return { clock, band, label, listed, sent, request, footer, view, up, down, upArrow, downArrow, click }
 }
 
 test('Alt+E steps the level up and Alt+Shift+E down, stopping at the ends, the footer shows model and level, main-loop requests carry it, the engine taking over drops it', async ($, on) => {
@@ -201,7 +205,7 @@ test('at max a light sweeps the bar while Claude works, and stops when it is don
   expect(await lit()).toBe(-1)
 })
 
-test('the band keeps what the plugins beneath draw there, and Alt+E and Alt+Shift+E still step', {
+test('the band keeps what the plugins beneath draw there, and the keys still step', {
   plugins: [{
     name: 'other-band',
     register(on) {
@@ -225,7 +229,81 @@ test('the band keeps what the plugins beneath draw there, and Alt+E and Alt+Shif
   await band.press({ key: 'effort-down' })
   await band.press({ key: 'effort-down' })
   expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
+  await band.press({ key: 'effort-up-arrow' })
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+  await band.press({ key: 'effort-down-arrow' })
+  expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
   expect(await theirs()).toBe('theirs')
+})
+
+test('the band holds four hidden Buttons: on the diff panel\'s file-list actions, whose default keys are Alt+↑ and Ctrl+↑, Alt+↓ and Ctrl+↓, and on strip:jump9 and strip:jump8, for an Alt+E and Alt+Shift+E the person binds', async ($, on) => {
+  const { band } = await world($, on)
+  const buttons = await band.findAll({ type: 'Button' })
+  expect(buttons.map(b => [b.key, b.props.action, b.props.label])).toEqual([
+    ['effort-up-arrow', 'app:diffFileListUp', 'effort up'],
+    ['effort-down-arrow', 'app:diffFileListDown', 'effort down'],
+    ['effort-up', 'strip:jump9', 'effort up'],
+    ['effort-down', 'strip:jump8', 'effort down'],
+  ])
+  // All four in one Box drawn as nothing, so the band shows only what the plugins beneath draw.
+  const hidden = (await band.findAll({ type: 'Box' })).filter(box => box.props.display === 'none')
+  expect(hidden.length).toBe(1)
+  expect(hidden[0]!.children.map(child => (child as RenderElement).type)).toEqual(['Button', 'Button', 'Button', 'Button'])
+})
+
+test('with no keybinding of the person\'s, Alt+↑ steps up and Alt+↓ down as Alt+E and Alt+Shift+E do: stopping at the ends, for the agent in view, each pair going on from the level the other left', async ($, on) => {
+  const { sent, request, footer, view, up, down, upArrow, downArrow } = await world($, on)
+  await request('medium', 'a1')
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+  await upArrow()
+  await upArrow()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▰ max')
+  // Up stops at max; down steps back.
+  await upArrow()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▰ max')
+  await downArrow()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▱ xhigh')
+  // Alt+Shift+E and Alt+↓ step the same level, one after the other.
+  await down()
+  await downArrow()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
+  await up()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+
+  // In a subagent's transcript they step that agent alone.
+  await view('a1')
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
+  await upArrow()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▱▱ high')
+  await downArrow()
+  await downArrow()
+  await downArrow()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▱▱▱▱ low')
+  await view()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+  await upArrow()
+  await request('high')
+  await request('medium', 'a1')
+  expect(sent.slice(1)).toEqual(['main:xhigh', 'a1:low'])
+})
+
+test('Alt+↑ and Alt+↓ step only through the levels the include toggles allow', { options: { includeLow: false, includeMax: false } }, async ($, on) => {
+  const { request, footer, view, upArrow, downArrow } = await world($, on)
+  await upArrow()
+  await upArrow()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▰▱ xhigh')
+  await downArrow()
+  await downArrow()
+  await downArrow()
+  expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
+  await request('medium', 'a1')
+  await view('a1')
+  await downArrow()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▱▱▱ medium')
+  await upArrow()
+  await upArrow()
+  await upArrow()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▰▰▰▱ xhigh')
 })
 
 test('each agent keeps its own level: the keys step the agent in view, the footer shows its level, its requests carry it', async ($, on) => {
@@ -520,6 +598,32 @@ test('with it on, a written change nudges the terminal, once a burst: the first 
   expect(writes.length).toBe(10)
   expect(runs.length).toBe(4)
   expect(runs.every(run => JSON.stringify(run) === JSON.stringify(runs[0]))).toBe(true)
+})
+
+test('with it on, Alt+↑ and Alt+↓ on a subagent write its row and nudge the terminal as Alt+E does; a press past the end, nothing', { options: { nudgeRows: true } }, async ($, on) => {
+  const { writes, parts } = files(on)
+  const runs = host(on)
+  const { clock, request, view, upArrow, downArrow, footer } = await world($, on, ROWS)
+  await request('medium', 'a1')
+  await clock.settle()
+  expect(runs).toEqual([NUDGE])
+  await view('a1')
+  await clock.advance(1000)
+  await upArrow()
+  expect(parts().agents).toEqual({ a1: 'Opus 5.5 ▰▰▰▱▱ high' })
+  expect(runs.length).toBe(2)
+  await clock.advance(1000)
+  await downArrow()
+  await downArrow()
+  expect(await footer()).toBe('Explore · Opus 5.5 ▰▱▱▱▱ low')
+  expect(parts().agents).toEqual({ a1: 'Opus 5.5 ▰▱▱▱▱ low' })
+  expect(runs.length).toBe(3)
+  const written = writes.length
+  await clock.advance(1000)
+  await downArrow()
+  await clock.settle()
+  expect(writes.length).toBe(written)
+  expect(runs.length).toBe(3)
 })
 
 test('with it on, nothing is nudged where no terminal draws the session (a desktop or remote host, a headless run)', { options: { nudgeRows: true } }, async ($, on) => {

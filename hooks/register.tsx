@@ -3,8 +3,9 @@ import type { AgentInfo, EngineInterface as Engine, PluginOptions, Register, Ren
 
 import type { AgentEffort } from '../types'
 
-// Alt+E steps the effort level up (low → medium → high → xhigh → max) and
-// Alt+Shift+E down, each stopping at the end, for the agent in view: the main
+// Alt+↑ (or Ctrl+↑) steps the effort level up (low → medium → high → xhigh → max)
+// and Alt+↓ (or Ctrl+↓) down, as do Alt+E and Alt+Shift+E once the person binds
+// them, each stopping at the end, for the agent in view: the main
 // thread, or the subagent whose transcript the person opened from the tasks
 // list. The footer shows that agent's model and level (`Opus 5.5 ▰▰▰▱▱ high`,
 // a subagent's led by its type, the meter and word colored cool to hot, the
@@ -41,9 +42,16 @@ import type { AgentEffort } from '../types'
 // footer on the other surface too, showing its own transcript.
 //
 // A key reaches a mod without a prompt only through a Button naming an engine
-// keybinding action, so keybindings.json binds meta+e to strip:jump9 and
-// meta+shift+e to strip:jump8 (both idle at the prompt) and two hidden Buttons
-// above the prompt take them, beside whatever other plugins draw there. No key with Shift as its only modifier can
+// keybinding action, and a plugin brings no keybindings, so hidden Buttons above
+// the prompt, beside whatever other plugins draw there, borrow actions. Two take
+// the diff panel's file-list actions, app:diffFileListUp and app:diffFileListDown,
+// whose default keys, Alt+↑ and Ctrl+↑, Alt+↓ and Ctrl+↓, do nothing at the
+// prompt, so they step with no setup. The panel (/diff, fullscreen) mounts its
+// own handler for them only while its list holds more files than it shows
+// (eight) and scrolls: then they scroll it instead. A person who rebinds those
+// actions moves these keys with them. Two take strip:jump9 and strip:jump8
+// (idle at the prompt), which a person's keybindings.json may bind meta+e and
+// meta+shift+e to. No key with Shift as its only modifier can
 // (Shift+Tab, Shift+Up): the engine hands a Button only chords and Ctrl or Alt
 // keys, even with the mode switch unbound. A slash command leaves a transcript
 // row. Claude Code's /effort prints rows too, so the mod never runs it: it sends
@@ -307,6 +315,8 @@ export const register: Register = (on, options) => {
       <Box flexDirection="column">
         {below}
         <Box display="none">
+          <Button key="effort-up-arrow" label="effort up" action="app:diffFileListUp" onPress={press => step($, options, 1, press.surface)} />
+          <Button key="effort-down-arrow" label="effort down" action="app:diffFileListDown" onPress={press => step($, options, -1, press.surface)} />
           <Button key="effort-up" label="effort up" action="strip:jump9" onPress={press => step($, options, 1, press.surface)} />
           <Button key="effort-down" label="effort down" action="strip:jump8" onPress={press => step($, options, -1, press.surface)} />
         </Box>
@@ -369,7 +379,7 @@ async function agentSpawned($: Engine, agentId: string, model: string) {
   await writeRows($, levels)
 }
 
-// Alt+E and Alt+Shift+E: a step of the agent the surface views.
+// Alt+↑ and Alt+↓ (Ctrl+↑ and Ctrl+↓; Alt+E and Alt+Shift+E where bound): a step of the agent the surface views.
 async function step($: Engine, options: PluginOptions, by: 1 | -1, surface: string) {
   await serially(async () => stepAgent($, options, by, (await $.state.get({ ...viewed, id: surface })).value ?? null))
 }
@@ -634,7 +644,7 @@ function plain(text: string): Run {
   return { text, style: {} }
 }
 
-// The level the main thread's next request goes out with: Alt+E's or Alt+Shift+E's, else the engine's
+// The level the main thread's next request goes out with: the keys' or the carets' pick, else the engine's
 // (its last request's, or before any the model's saved default).
 async function effortFor($: Engine, model: string): Promise<string> {
   const chosen = (await $.state.get(override)).value
