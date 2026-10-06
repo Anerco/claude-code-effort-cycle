@@ -98,6 +98,109 @@ test('Alt+E steps the level up and Alt+Shift+E down, stopping at the ends, the f
   expect(await footer()).toContain('▱ medium')
 })
 
+// Settings as Claude Code loads them, one file per source, and the merge it runs under: each key from the highest
+// loaded source that has it, `modelSettings` merged model by model. A source left out of `loaded` is one
+// `--setting-sources` left out: its file still reads, the merge leaves it out.
+type Source = 'user' | 'project' | 'local' | 'flag' | 'policy'
+const SOURCE_ORDER: Source[] = ['user', 'project', 'local', 'flag', 'policy']
+function settingsFiles(on: On) {
+  const files: Partial<Record<Source, Record<string, unknown>>> = {}
+  const loaded = new Set<Source>(SOURCE_ORDER)
+  on('settings.read', (_, e) => {
+    if (e.source !== undefined) return { value: files[e.source] ?? {} }
+    const merged: Record<string, unknown> = {}
+    for (const source of SOURCE_ORDER.filter(s => loaded.has(s)))
+      for (const [key, value] of Object.entries(files[source] ?? {})) {
+        if (key !== 'modelSettings') merged[key] = value
+        else {
+          const into = { ...(merged.modelSettings as Record<string, object> | undefined) }
+          for (const [model, entry] of Object.entries(value as Record<string, object>)) into[model] = { ...into[model], ...entry }
+          merged.modelSettings = into
+        }
+      }
+    return { value: merged }
+  })
+  return { files, loaded }
+}
+
+test('before the first request the footer shows the level Claude Code resolves for the model, with no level in settings the model\'s own (medium on Opus 5.5 and Sonnet 5.5, xhigh on Opus 4.7, high on the rest), and the keys step on from it', async ($, on) => {
+  engineBand(on)
+  settingsFiles(on)
+  let model = 'claude-opus-5-5'
+  on('session.model', () => ({ value: model }))
+  const sent: unknown[] = []
+  on('turn.step', async function* (_, e) {
+    sent.push(e.effort)
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: null, usage: null }
+  })
+  const request = async (effort: string) => {
+    for await (const _ of $.turn.step({ turnId: 't', index: 0, model, effort, messageCount: 1 } as any));
+  }
+  const band = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'AbovePrompt', props: BAND })
+  const label = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  const footer = async () => {
+    await label.redraw({ modes: [] })
+    return spaced((await label.find({ key: 'effort' }))?.text)
+  }
+
+  expect(await footer()).toBe('Opus 5.5 ▰▰▱▱▱ medium')
+  for (const [name, shown] of [['claude-sonnet-5-5', 'Sonnet 5.5 ▰▰▱▱▱ medium'], ['claude-opus-4-7', 'Opus 4.7 ▰▰▰▰▱ xhigh'], ['claude-opus-5', 'Opus 5 ▰▰▰▱▱ high'], ['claude-opus-5-5[1m]', 'Opus 5.5 1M ▰▰▱▱▱ medium']] as const) {
+    model = name
+    expect(await footer()).toBe(shown)
+  }
+  // A step starts from the level shown, and the first request, at Claude Code's own level, keeps the pick.
+  model = 'claude-opus-5-5'
+  await band.press({ key: 'effort-up-arrow' })
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+  await request('medium')
+  expect(sent).toEqual(['high'])
+  expect(await footer()).toBe('Opus 5.5 ▰▰▰▱▱ high')
+})
+
+test('before the first request a level in settings counts as Claude Code counts it: one saved for the model under any spelling, the user\'s own top-level one only on models before Opus 5.5, a higher source\'s first, none from a source Claude Code did not load, and CLAUDE_CODE_EFFORT_LEVEL over all', async ($, on) => {
+  const { files, loaded } = settingsFiles(on)
+  let model = 'claude-opus-5-5'
+  on('session.model', () => ({ value: model }))
+  const env: Record<string, string | undefined> = {}
+  on('env.get', (_, e) => ({ value: env[e.name] }))
+  const label = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'SessionMode', props: { modes: [] } })
+  const level = async () => {
+    await label.redraw({ modes: [] })
+    return spaced((await label.find({ key: 'effort' }))?.text)?.split(' ').at(-1)
+  }
+
+  // ~/.claude/settings.json's top-level level: Opus 5.5 keeps its own, Opus 5 takes it.
+  files.user = { effortLevel: 'low' }
+  expect(await level()).toBe('medium')
+  model = 'claude-opus-5'
+  expect(await level()).toBe('low')
+  // One saved for the model, as /effort saves it, under its name or a dated or Bedrock spelling.
+  model = 'claude-opus-5-5'
+  files.user = { effortLevel: 'low', modelSettings: { 'claude-opus-5-5-20260101': { effortLevel: 'xhigh' } } }
+  expect(await level()).toBe('xhigh')
+  files.user = { modelSettings: { 'us.anthropic.claude-opus-5-5-v1:0': { effortLevel: 'low' }, 'claude-opus-5-5': { effortLevel: 'high' } } }
+  expect(await level()).toBe('high')
+  // A project's top-level level is above the user's file, and counts for every model.
+  files.project = { effortLevel: 'low' }
+  expect(await level()).toBe('low')
+  // Unless a local one saved for the model is higher still; a level settings never save (max) gives the model's own.
+  files.local = { modelSettings: { 'claude-opus-5-5': { effortLevel: 'max' } } }
+  expect(await level()).toBe('medium')
+  files.local = {}
+  // A source Claude Code did not load is passed over.
+  loaded.delete('project')
+  expect(await level()).toBe('high')
+  loaded.delete('user')
+  expect(await level()).toBe('medium')
+  // CLAUDE_CODE_EFFORT_LEVEL wins over every setting.
+  loaded.add('user')
+  env.CLAUDE_CODE_EFFORT_LEVEL = 'med'
+  model = 'claude-opus-4-7'
+  expect(await level()).toBe('medium')
+  env.CLAUDE_CODE_EFFORT_LEVEL = 'max'
+  expect(await level()).toBe('max')
+})
+
 test('the keys step only through the levels the include toggles allow', { options: { includeLow: false, includeMax: false } }, async ($, on) => {
   engineBand(on)
   on('settings.read', () => ({ value: { effortLevel: 'medium' } }))
@@ -181,7 +284,9 @@ test('at max the model name turns red, and a press past either end lights the wo
 test('at max a light sweeps the bar while Claude works, and stops when it is done', async ($, on) => {
   engineBand(on)
   const clock = mock.clock(on)
-  on('settings.read', () => ({ value: { effortLevel: 'max' } }))
+  // Settings never save max: a session starts there through CLAUDE_CODE_EFFORT_LEVEL (or --effort).
+  on('settings.read', () => ({ value: {} }))
+  on('env.get', (_, e) => ({ value: e.name === 'CLAUDE_CODE_EFFORT_LEVEL' ? 'max' : undefined }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   const props = { hasSurvey: false, isWorking: true, maxRows: 20, bodyColumns: 120 } as any
   const band = await $.ui.mount({ plugin: 'effort-cycle', surface: 'terminal', component: 'AbovePrompt', props })

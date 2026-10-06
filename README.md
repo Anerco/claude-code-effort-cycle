@@ -1,26 +1,23 @@
-# effort-cycle: effort level keyboard shortcuts for Claude Code
+# effort-cycle: per-agent effort levels for Claude Code
 
-A Claude Code plugin that changes the reasoning effort level from the
-keyboard, per agent, without leaving a row in the transcript:
+Turn Claude Code's reasoning effort up or down from the keyboard, for the main
+thread or any one subagent, and see each agent's level at a glance. There is
+nothing to bind, and nothing is left in the transcript:
 
-- **Alt+↑** steps the effort up: low → medium → high → xhigh → max, stopping at max.
-- **Alt+↓** steps it down, stopping at low.
-- **Ctrl+↑** and **Ctrl+↓** do the same. These are Claude Code's own keys for
-  the diff panel's file list, idle at the prompt, so they step as soon as the
-  plugin is installed, with nothing to bind. Alt+E and Alt+Shift+E step too,
-  once you bind them ([Alt+E and Alt+Shift+E](#alte-and-altshifte)).
+- **Ctrl+↑** steps the effort up: low → medium → high → xhigh → max, stopping
+  at max. **Ctrl+↓** steps it down, stopping at low. They work as soon as the
+  plugin is installed (on macOS, see [Install](#install)).
 - The keys change the agent in view: the main thread, or the subagent whose
   transcript you opened from the tasks list. Every other agent keeps its level.
-- The footer shows that agent's model and level as they change, as a meter colored
-  cool to hot (gray, green, yellow, orange, red, by theme color), the blocks a
-  press fills or empties lit for a moment: `Opus 5.5 ▰▰▰▱▱ high`. A press past
+- The footer shows that agent's model and level as a meter colored cool to hot
+  (gray, green, yellow, orange, red, by theme color): `Opus 5.5 ▰▰▰▱▱ high`.
+  The blocks a press fills or empties light for a moment, and a press past
   either end lights the level's word. At max the model name turns red too, and
-  while Claude works a light sweeps across the bar. In a subagent's
-  transcript the meter is that agent's, led by its type:
-  `Explore · Opus 5.5 ▰▰▱▱▱ medium`.
+  while Claude works a light sweeps across the bar. In a subagent's transcript
+  the meter is that agent's, led by its type: `Explore · Opus 5.5 ▰▰▱▱▱ medium`.
 - Point at the footer's label and a **‹** and a **›** appear around the meter:
-  click **‹** to step down and **›** to step up, exactly as Alt+↓ and
-  Alt+↑ do, for the agent the footer shows. Their cells stay blank while the
+  click **‹** to step down and **›** to step up, exactly as Ctrl+↓ and
+  Ctrl+↑ do, for the agent the footer shows. Their cells stay blank while the
   pointer is elsewhere, and the level's word keeps a fixed width, so nothing
   moves as they appear or as the level changes:
 
@@ -40,16 +37,21 @@ keyboard, per agent, without leaving a row in the transcript:
   `python3`). Claude Code redraws those rows every five seconds; an optional
   toggle makes a row follow a press in about 0.4 s instead.
 
-![The effort keys step the meter up to max, a light sweeps the bar while Claude works, and they step it back down](demo.gif)
+![Ctrl+↑ steps the footer's effort meter up to max, a light sweeps the bar while Claude works and a subagent's row in the tasks list shows its own level, then Ctrl+↓ steps the meter back down](demo.gif)
 
 Each agent's level is its own and applies to that agent's next model requests.
-A subagent starts at the level Claude Code gives it (its definition's
-`effort`, else the main thread's), which the plugin reads off the subagent's
-first model request; until then its meter is empty (`—`), and a press or a
-click leaves it and says `wait`. Its model shows from the moment it starts:
-`Explore · Opus 5.5 ▱▱▱▱▱ —`. Changing effort Claude Code's way (`/effort`,
-the Alt+P picker) takes over again from the next request, for the main thread
-and for any subagent whose level Claude Code changes with it.
+The main thread starts at the level Claude Code gives its model, which the
+footer shows from the moment the session opens, before any request:
+`CLAUDE_CODE_EFFORT_LEVEL` if it is set, else a level your settings save for
+the model (as `/effort` and the Alt+P picker save one), else the model's own
+default, such as medium on Opus 5.5. A subagent starts at the level Claude
+Code gives it (its definition's `effort`, else the main thread's), which the
+plugin reads off the subagent's first model request; until then its meter is
+empty (`—`), and a press or a click leaves it and says `wait`. Its model shows
+from the moment it starts: `Explore · Opus 5.5 ▱▱▱▱▱ —`. Changing effort
+Claude Code's way (`/effort`, the Alt+P picker) takes over again from the next
+request, for the main thread and for any subagent whose level Claude Code
+changes with it.
 
 With the session also open on another surface over Remote Control (Claude
 Code Desktop), each surface follows its own view: the keys and that surface's
@@ -67,10 +69,11 @@ footer itself, to draw the meter and its ‹ ›; the ‹ ›'s clicks, to step 
 agent the footer shows, and a ‹ › that fails to load, to draw that surface's
 footer without them; the Agent calls' rows, to add the line under them; and
 the band above the prompt, which says whose transcript is in view and where
-four hidden buttons take the keys, leaving whatever other plugins and Claude
-Code show there in place. It reads your settings and the session's list of
-agents and nothing else, sends nothing anywhere, and keeps its state in the
-session, save the levels it leaves for the tasks list's rows. It sets one
+hidden buttons take the keys, leaving whatever other plugins and Claude Code
+show there in place. It reads your settings, `CLAUDE_CODE_EFFORT_LEVEL` and
+the session's list of agents and nothing else, sends nothing anywhere, and
+keeps its state in the session, save the levels it leaves for the tasks
+list's rows. It sets one
 environment variable, `EFFORT_CYCLE_ROWS`, to the path of its own
 `subagent-rows/rows.py`, which the commands Claude Code starts inherit. With
 **Tasks list rows: update at once** on, it also runs a short
@@ -90,9 +93,9 @@ Install it from the [anerco marketplace](https://github.com/Anerco/plugins), in 
 /plugin install effort-cycle@anerco
 ```
 
-That is all: Alt+↑ and Alt+↓, and Ctrl+↑ and Ctrl+↓, step the level from
-then on, and the tasks list's rows show it, as the plugin brings their
-setting with it ([Levels in the tasks list](#levels-in-the-tasks-list)).
+That is all: Ctrl+↑ and Ctrl+↓ step the level from then on, and the tasks
+list's rows show it, as the plugin brings their setting with it
+([Levels in the tasks list](#levels-in-the-tasks-list)).
 
 Or, to work on it, clone the repo and load the folder with
 `claude --plugin-dir <folder>`, or in every session through
@@ -101,40 +104,18 @@ Or, to work on it, clone the repo and load the folder with
 A mod cannot own a key, and a plugin brings no keybindings. A mod can only
 borrow one of Claude Code's own keybinding actions, so the plugin listens for
 the diff panel's file-list actions, `app:diffFileListUp` (up) and
-`app:diffFileListDown` (down), whose default keys are Alt+↑ and Ctrl+↑, Alt+↓
-and Ctrl+↓, and which do nothing at the prompt. A draft in the prompt stays as
-it is. While the diff panel's file list scrolls, the keys are its own again
+`app:diffFileListDown` (down), whose default keys are Ctrl+↑ and Ctrl+↓, and
+which do nothing at the prompt. A draft in the prompt stays as it is. While
+the diff panel's file list scrolls, the keys are its own again
 ([Known issues](#known-issues)).
 
-On macOS, Option+↑ and Option+↓ reach Claude Code only when the terminal
-sends Option as Meta, as Option+E does: in Terminal.app turn on **Use Option
-as Meta key** (Settings → Profiles → Keyboard), in iTerm2 set **Left Option
-key** to **Esc+** (Settings → Profiles → Keys), in Ghostty set
-`macos-option-as-alt = true`. Ctrl+↑ and Ctrl+↓ are Mission Control's and
-Application windows' by default; turn those off in System Settings →
-Keyboard → Keyboard Shortcuts → Mission Control to use them here.
-
-### Alt+E and Alt+Shift+E
-
-To step with Alt+E and Alt+Shift+E as well, bind them in
-`~/.claude/keybindings.json`:
-
-```json
-{
-  "bindings": [
-    { "context": "Global", "bindings": { "meta+e": "strip:jump9", "meta+shift+e": "strip:jump8" } }
-  ]
-}
-```
-
-The plugin listens for `strip:jump9` (up) and `strip:jump8` (down) too, both
-idle at the prompt, so these keys step exactly as Alt+↑ and Alt+↓ do. Any
-modified key or chord works; a bare letter does not. Before 0.2.2 this
-binding was the only way to step from the keyboard, and a binding made then
-keeps working.
-
-On macOS, Option+E types an accent unless the terminal sends Option as Meta
-(above). Or bind a ctrl chord instead.
+On macOS, Ctrl+↑ and Ctrl+↓ belong to Mission Control and Application windows
+by default. Turn those off in System Settings → Keyboard → Keyboard Shortcuts
+→ Mission Control, or step with Option+↑ and Option+↓, which Claude Code binds
+to the same actions, once the terminal sends Option as Meta: in Terminal.app
+turn on **Use Option as Meta key** (Settings → Profiles → Keyboard), in iTerm2
+set **Left Option key** to **Esc+** (Settings → Profiles → Keys), in Ghostty
+set `macos-option-as-alt = true`.
 
 ## Levels in the tasks list
 
@@ -220,8 +201,8 @@ that: each time the plugin writes a changed level, it runs a short `python3`
 process that narrows the terminal by one column and restores it 5 ms later,
 and Claude Code redraws the row about 0.36 s after the press.
 
-Measured with Claude Code 2.1.291 in tmux on Linux (WSL2), from Alt+E to the
-row showing the new level:
+Measured with Claude Code 2.1.291 in tmux on Linux (WSL2), from a key press
+to the row showing the new level:
 
 | | view | fastest | median | slowest | presses |
 | --- | --- | --- | --- | --- | --- |
@@ -281,6 +262,14 @@ marketplace).
   ([#1](https://github.com/Anerco/claude-code-effort-cycle/issues/1)). The footer is the
   level the requests go out with; the spinner reads Claude Code's own state,
   which a mod cannot change.
+- **Before the first request, the footer works the main thread's level out.**
+  Claude Code tells a plugin a model's effort only on a request, so until the
+  first one the plugin resolves it as Claude Code 2.1.291 does, from
+  `CLAUDE_CODE_EFFORT_LEVEL`, your settings and the model's built-in default.
+  An organization's default, the model list Anthropic's API serves and Claude
+  Code's server-side flags can give a model another default that a plugin
+  cannot see; if one does, the footer shows Claude Code's level from the first
+  request on, and a pick of the keys made before it stands.
 - **The level is not kept after a restart.** A pick of the keys lasts for the
   session. A mod cannot write settings, so it cannot save the level the way
   the Alt+P picker does.
@@ -303,21 +292,18 @@ marketplace).
   footer's label, so they work where Claude Code gets mouse events from the
   terminal, as in its fullscreen view; inside tmux that takes
   `set -g mouse on`. Elsewhere their cells stay blank, and the keys still step.
-  They take no key: from the keyboard, Alt+↑ and Alt+↓.
-- **Alt+↑ and Alt+↓ are the diff panel's keys.** The plugin borrows Claude
+  They take no key: from the keyboard, Ctrl+↑ and Ctrl+↓.
+- **Ctrl+↑ and Ctrl+↓ are the diff panel's keys.** The plugin borrows Claude
   Code's actions for scrolling the diff panel's file list,
   `app:diffFileListUp` and `app:diffFileListDown` ([Install](#install)). While
   the panel is open (`/diff` in the fullscreen view) and lists more changed
-  files than it shows at once (eight), Alt+↑ and Alt+↓, and Ctrl+↑ and
-  Ctrl+↓, scroll that list and step nothing; close the panel to step again.
-  With fewer files, or with the panel closed, they step as usual. Alt+E and
-  Alt+Shift+E, if you bound them, step either way. If you rebind those
-  actions in `~/.claude/keybindings.json`, the effort keys move with them, and
-  unbinding them leaves only Alt+E and Alt+Shift+E.
+  files than it shows at once (eight), the keys scroll that list and step
+  nothing; close the panel to step again. With fewer files, or with the panel
+  closed, they step as usual. If you rebind those actions in
+  `~/.claude/keybindings.json`, the effort keys move with them.
 - **On macOS, Ctrl+↑ and Ctrl+↓ are Mission Control's** (Mission Control and
-  Application windows) unless you turn those shortcuts off, and Option+↑ and
-  Option+↓ need the terminal to send Option as Meta, as Option+E does
-  ([Install](#install)).
+  Application windows) unless you turn those shortcuts off; [Install](#install)
+  says how, and which keys to use instead.
 - **Ultracode is not a step.** It is a separate on/off switch that works at
   any level (`/effort ultracode on`), and the plugin API exposes no way to
   switch it.
@@ -336,14 +322,14 @@ generated per Claude Code build and are not committed.
 
 ## Privacy
 
-effort-cycle collects no personal data. It reads Claude Code's own settings
-and the session's model and agents, keeps each agent's effort level in session state
-on your machine, and sends nothing to any server: no telemetry, no network
-requests. For the tasks list's rows it also writes each subagent's model and
-level to a file under `~/.claude/subagent-rows`, which the script deletes a week
-after the session last wrote it, and sets `EFFORT_CYCLE_ROWS` to its script's
-path in Claude Code's environment; otherwise nothing is kept after the session
-ends.
+effort-cycle collects no personal data. It reads Claude Code's own settings,
+the `CLAUDE_CODE_EFFORT_LEVEL` variable and the session's model and agents,
+keeps each agent's effort level in session state on your machine, and sends
+nothing to any server: no telemetry, no network requests. For the tasks
+list's rows it also writes each subagent's model and level to a file under
+`~/.claude/subagent-rows`, which the script deletes a week after the session
+last wrote it, and sets `EFFORT_CYCLE_ROWS` to its script's path in Claude
+Code's environment; otherwise nothing is kept after the session ends.
 
 ## License
 

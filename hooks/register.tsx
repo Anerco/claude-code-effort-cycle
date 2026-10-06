@@ -3,12 +3,15 @@ import type { AgentInfo, EngineInterface as Engine, PluginOptions, Register, Ren
 
 import type { AgentEffort } from '../types'
 
-// Alt+↑ (or Ctrl+↑) steps the effort level up (low → medium → high → xhigh → max)
-// and Alt+↓ (or Ctrl+↓) down, as do Alt+E and Alt+Shift+E once the person binds
-// them, each stopping at the end, for the agent in view: the main
+// Ctrl+↑ (or Alt+↑) steps the effort level up (low → medium → high → xhigh → max)
+// and Ctrl+↓ (or Alt+↓) down, as do Alt+E and Alt+Shift+E where a person bound
+// them (the README no longer offers that binding; one made before keeps working),
+// each stopping at the end, for the agent in view: the main
 // thread, or the subagent whose transcript the person opened from the tasks
-// list. The footer shows that agent's model and level (`Opus 5.5 ▰▰▰▱▱ high`,
-// a subagent's led by its type, the meter and word colored cool to hot, the
+// list. Before the main thread's first request on a model, its level is the one
+// Claude Code resolves for that model (engineLevel), as Claude Code's own
+// `◐ medium · /effort` shows it. The footer shows that agent's model and level
+// (`Opus 5.5 ▰▰▰▱▱ high`, a subagent's led by its type, the meter and word colored cool to hot, the
 // blocks a press filled or emptied lit for a moment) the moment either changes,
 // and a line under each Agent call shows the level of the agent it started.
 // Steps run one at a time. A press past either end lights the word instead. At
@@ -45,7 +48,7 @@ import type { AgentEffort } from '../types'
 // keybinding action, and a plugin brings no keybindings, so hidden Buttons above
 // the prompt, beside whatever other plugins draw there, borrow actions. Two take
 // the diff panel's file-list actions, app:diffFileListUp and app:diffFileListDown,
-// whose default keys, Alt+↑ and Ctrl+↑, Alt+↓ and Ctrl+↓, do nothing at the
+// whose default keys, Ctrl+↑ and Alt+↑, Ctrl+↓ and Alt+↓, do nothing at the
 // prompt, so they step with no setup. The panel (/diff, fullscreen) mounts its
 // own handler for them only while its list holds more files than it shows
 // (eight) and scrolls: then they scroll it instead. A person who rebinds those
@@ -379,7 +382,7 @@ async function agentSpawned($: Engine, agentId: string, model: string) {
   await writeRows($, levels)
 }
 
-// Alt+↑ and Alt+↓ (Ctrl+↑ and Ctrl+↓; Alt+E and Alt+Shift+E where bound): a step of the agent the surface views.
+// Ctrl+↑ and Ctrl+↓ (Alt+↑ and Alt+↓; Alt+E and Alt+Shift+E where bound): a step of the agent the surface views.
 async function step($: Engine, options: PluginOptions, by: 1 | -1, surface: string) {
   await serially(async () => stepAgent($, options, by, (await $.state.get({ ...viewed, id: surface })).value ?? null))
 }
@@ -645,20 +648,104 @@ function plain(text: string): Run {
 }
 
 // The level the main thread's next request goes out with: the keys' or the carets' pick, else the engine's
-// (its last request's, or before any the model's saved default).
+// (its last request's, or before any the level Claude Code resolves for the model).
 async function effortFor($: Engine, model: string): Promise<string> {
   const chosen = (await $.state.get(override)).value
   if (chosen?.model === model) return chosen.level
   const held = (await $.state.get(base)).value
   if (held?.model === model) return held.level
-  // Settings are the person's own JSON, typed unknown: a level is a string, anything else none.
-  const settings = await $.settings.read()
-  const perModel = settings.modelSettings as { readonly [model: string]: { readonly effortLevel?: unknown } | undefined } | undefined
-  return levelOf(perModel?.[model]?.effortLevel) ?? levelOf(settings.effortLevel) ?? 'high'
+  return engineLevel($, model)
 }
 
-function levelOf(value: unknown): string | undefined {
-  return typeof value === 'string' ? value : undefined
+// The level Claude Code sends a model's requests at before any has said it, resolved as Claude Code 2.1.291 resolves
+// it (and shows it, `◐ medium · /effort`, as a session starts): CLAUDE_CODE_EFFORT_LEVEL; else the first settings
+// source, highest precedence first, that gives the model a level, in `modelSettings` under its name (or a dated, [1m],
+// Bedrock or Vertex spelling of it) or at its top level, the user's own top-level `effortLevel` only for the models
+// before Opus 5.5 and Sonnet 5.5; else the model's own default. A source Claude Code did not load (`--setting-sources`)
+// is passed over: its level is not the one the merged settings hold. A level Claude Code does not save (`max`, a typo)
+// gives the model's default. An organization's default, the model list Anthropic's API serves and Claude Code's
+// server-side flags can change a model's default with nothing a plugin can read; the first request says what it is,
+// and the footer follows that from then on.
+async function engineLevel($: Engine, model: string): Promise<string> {
+  const fromEnv = await envLevel($)
+  if (fromEnv !== undefined) return fromEnv
+  const id = canonical(model)
+  const merged = await $.settings.read()
+  const mergedModel = modelSettingsOf(merged)
+  let userLevel: unknown
+  for (const source of SOURCES) {
+    const settings = await $.settings.read({ source })
+    const named = modelEntry(settings, id)
+    if (named !== undefined && mergedModel[named.key]?.effortLevel === named.level) return savedLevel(named.level) ?? modelDefault(id)
+    if (settings.effortLevel === undefined || settings.effortLevel !== merged.effortLevel) continue
+    if (source !== 'user') return savedLevel(settings.effortLevel) ?? modelDefault(id)
+    userLevel = settings.effortLevel
+  }
+  const isLegacy = LEGACY_MODELS.has(id) || !/^claude-/.test(id)
+  return (isLegacy ? savedLevel(userLevel) : undefined) ?? modelDefault(id)
+}
+
+// CLAUDE_CODE_EFFORT_LEVEL, as Claude Code reads it: a level (`med` for medium) wins over every setting, a number and
+// `unset` or `auto` show as high, anything else is no level.
+async function envLevel($: Engine): Promise<string | undefined> {
+  let value: string | undefined
+  try {
+    value = (await $.env.get('CLAUDE_CODE_EFFORT_LEVEL'))?.trim().toLowerCase()
+  } catch {
+    return undefined
+  }
+  if (!value) return undefined
+  const level = value === 'med' ? 'medium' : value
+  if (LEVELS.includes(level)) return level
+  return value === 'unset' || value === 'auto' || Number.isInteger(parseInt(value, 10)) ? 'high' : undefined
+}
+
+// Settings sources, highest precedence first, as Claude Code walks them for a model's level.
+const SOURCES = ['policy', 'flag', 'local', 'project', 'user'] as const
+// The models a top-level `effortLevel` in ~/.claude/settings.json still applies to in Claude Code 2.1.291, and to a
+// name it cannot read as a Claude model; a later model takes only a level saved for it (`modelSettings`, as /effort
+// and Alt+P save one) or a project, local, `--settings` or managed top-level one.
+const LEGACY_MODELS = new Set([
+  'claude-3-5-haiku', 'claude-3-5-sonnet', 'claude-3-7-sonnet', 'claude-haiku-4-5', 'claude-sonnet-4-0', 'claude-sonnet-4-5',
+  'claude-sonnet-4-6', 'claude-sonnet-5', 'claude-opus-4-0', 'claude-opus-4-1', 'claude-opus-4-5', 'claude-opus-4-6',
+  'claude-opus-4-7', 'claude-opus-4-8', 'claude-opus-5', 'claude-fable-5', 'claude-fable-5-1', 'claude-mythos-5', 'claude-mythos-5-1',
+])
+// A model's default level where Claude Code 2.1.291's own model catalog gives one other than high.
+const MODEL_DEFAULTS: Record<string, string> = { 'claude-opus-5-5': 'medium', 'claude-sonnet-5-5': 'medium', 'claude-opus-4-7': 'xhigh' }
+
+function modelDefault(id: string): string {
+  return MODEL_DEFAULTS[id] ?? 'high'
+}
+
+// A level as settings save one: low to xhigh; anything else none.
+function savedLevel(value: unknown): string | undefined {
+  return typeof value === 'string' && LEVELS.includes(value) && value !== 'max' ? value : undefined
+}
+
+// A settings file's `modelSettings`: its own JSON, typed unknown, read as entries that may carry a level.
+function modelSettingsOf(settings: Readonly<Record<string, unknown>>): Readonly<Record<string, { readonly effortLevel?: unknown } | undefined>> {
+  const value = settings.modelSettings
+  return typeof value === 'object' && value !== null ? (value as Readonly<Record<string, { readonly effortLevel?: unknown } | undefined>>) : {}
+}
+
+// The `modelSettings` entry that gives a model a level in one settings file: the one under its canonical name, else
+// one under another spelling of it.
+function modelEntry(settings: Readonly<Record<string, unknown>>, id: string): { key: string; level: unknown } | undefined {
+  let found: { key: string; level: unknown } | undefined
+  for (const [key, entry] of Object.entries(modelSettingsOf(settings))) {
+    if (entry?.effortLevel === undefined || canonical(key) !== id) continue
+    if (key === id) return { key, level: entry.effortLevel }
+    found ??= { key, level: entry.effortLevel }
+  }
+  return found
+}
+
+// A model's canonical name, as settings key it: claude-haiku-4-5-20251001, claude-opus-5-5[1m],
+// us.anthropic.claude-opus-5-5-v1:0 and claude-opus-5-5@20260101 → claude-haiku-4-5, claude-opus-5-5.
+function canonical(model: string): string {
+  const name = model.trim().toLowerCase().replace(/\[[12]m\]$/, '')
+  const found = /claude-[a-z0-9-]*[a-z0-9]/.exec(name)?.[0]
+  return found === undefined ? name : found.replace(/-v\d+$/, '').replace(/-\d{8}$/, '')
 }
 
 // claude-opus-5-5 → Opus 5.5, claude-haiku-4-5-20251001 → Haiku 4.5, …[1m] → … 1M.
